@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { stageLayoutIds, type StageLayoutId } from "@live2d-chat/shared";
 import type { SceneController } from "@/model/live2d/scene-controller";
 import { live2dCatalog } from "@/model/live2d/catalog";
 
@@ -43,6 +44,12 @@ export function Live2DStage({ onReady, onError }: Props) {
         app.stage.addChild(model);
         model.interactive = false;
         const controller = new SceneController(app, model);
+        if (import.meta.env.DEV) {
+          const requestedLayout = new URLSearchParams(window.location.search).get("layout");
+          if (stageLayoutIds.includes(requestedLayout as StageLayoutId)) {
+            controller.setStageLayout(requestedLayout as StageLayoutId);
+          }
+        }
         const observer = new ResizeObserver(() => {
           controller.resize(host.clientWidth, host.clientHeight);
         });
@@ -50,6 +57,7 @@ export function Live2DStage({ onReady, onError }: Props) {
         onReady(controller);
         cleanup = () => {
           observer.disconnect();
+          controller.dispose();
           app.destroy(true, { children: true, texture: false, baseTexture: false });
         };
       } catch (error) {

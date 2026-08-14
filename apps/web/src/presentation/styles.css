@@ -22,11 +22,6 @@ button { cursor: pointer; }
 .empty-copy h1 { margin: 5px 0 10px; font-size: 26px; }
 .empty-copy p:last-child { color: #aaa4b8; line-height: 1.55; margin-bottom: 0; }
 .eyebrow { margin: 0; color: #e98bb6; letter-spacing: .15em; font-size: 10px; font-weight: 700; }
-.message-list { display: flex; flex-direction: column; gap: 12px; max-height: calc(100vh - 230px); padding: 18px; overflow-y: auto; }
-.message { padding: 12px 14px; border-radius: 16px; background: rgba(255,255,255,.07); }
-.message.user { margin-left: 32px; background: rgba(142,108,232,.22); }
-.message span { color: #e995bd; font-size: 11px; font-weight: 700; }
-.message p { margin: 5px 0 0; line-height: 1.45; font-size: 14px; white-space: pre-wrap; }
 .subtitle { position: absolute; left: 50%; bottom: 112px; transform: translateX(-50%); max-width: min(760px, 82vw); padding: 10px 18px; border-radius: 14px; background: rgba(7,6,12,.72); text-align: center; text-shadow: 0 2px 8px #000; line-height: 1.5; }
 .composer { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); width: min(760px, calc(100vw - 48px)); min-height: 66px; padding: 9px; border-radius: 24px; display: flex; align-items: flex-end; gap: 9px; }
 .composer textarea { flex: 1; min-height: 46px; max-height: 120px; resize: none; border: 0; outline: 0; padding: 12px 6px; color: #fff; background: transparent; }
@@ -49,6 +44,18 @@ button { cursor: pointer; }
 .settings-section .primary-button { border-color: rgba(226,112,167,.42); background: linear-gradient(135deg,rgba(226,112,167,.28),rgba(120,98,217,.24)); }
 .settings-section .pause-button { border-color: rgba(255,190,105,.4); color: #ffd39a; background: rgba(222,145,58,.12); }
 .settings-section.compact { grid-template-columns: 1fr auto; align-items: center; }
+.history-setting { grid-template-columns: 1fr auto; align-items: center; }
+.history-setting button { justify-self: end; }
+.history-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 24px; background: rgba(2,2,5,.7); backdrop-filter: blur(10px); }
+.history-dialog { display: flex; flex-direction: column; width: min(680px, 100%); max-height: min(720px, calc(100vh - 48px)); overflow: hidden; border: 1px solid rgba(255,255,255,.12); border-radius: 24px; background: #12101b; box-shadow: 0 28px 90px rgba(0,0,0,.55); }
+.history-header { display: flex; align-items: center; justify-content: space-between; padding: 22px 24px 18px; border-bottom: 1px solid rgba(255,255,255,.09); }
+.history-header h2 { margin: 4px 0 0; font-size: 24px; }
+.history-list { display: flex; flex-direction: column; gap: 12px; padding: 20px 24px 24px; overflow-y: auto; }
+.history-message { max-width: 86%; padding: 13px 15px; border-radius: 16px; background: rgba(255,255,255,.07); }
+.history-message.user { align-self: flex-end; background: rgba(142,108,232,.22); }
+.history-message span { color: #e995bd; font-size: 11px; font-weight: 700; }
+.history-message p { margin: 5px 0 0; line-height: 1.5; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.history-empty { padding: 44px 24px; color: #aaa4b8; text-align: center; }
 .field { display: grid; gap: 6px; color: #aaa3b5; font-size: 12px; }
 .field input, .field select, .field textarea { width: 100%; border: 1px solid rgba(255,255,255,.12); border-radius: 11px; outline: 0; padding: 10px 12px; color: #f6f2fb; background: rgba(255,255,255,.055); }
 .field input:focus, .field select:focus { border-color: #da79aa; }
@@ -76,7 +83,10 @@ button { cursor: pointer; }
 @media (max-width: 700px) {
   .top-bar { top: 12px; left: 12px; right: 12px; }
   .conversation { top: 90px; left: 12px; width: calc(100vw - 24px); max-height: 30vh; }
-  .message-list { max-height: 30vh; }
+  .history-setting { grid-template-columns: 1fr; }
+  .history-setting button { justify-self: start; }
+  .history-backdrop { padding: 12px; }
+  .history-dialog { max-height: calc(100vh - 24px); }
   .subtitle { bottom: 100px; }
   .composer { bottom: 12px; width: calc(100vw - 24px); }
   .range-grid { grid-template-columns: 1fr; }

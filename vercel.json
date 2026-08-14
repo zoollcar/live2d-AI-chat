@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "fluid": true,
   "buildCommand": "pnpm build",
   "outputDirectory": "apps/web/dist",
   "functions": {

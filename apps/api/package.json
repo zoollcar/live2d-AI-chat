@@ -13,13 +13,13 @@
   "dependencies": {
     "@hono/node-server": "^2.1.1",
     "@live2d-chat/shared": "workspace:*",
-    "dotenv": "^17.2.3",
+    "dotenv": "^17.4.2",
     "hono": "^4.13.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "tsx": "^4.23.12",
     "tsup": "^8.5.1",
-    "typescript": "~6.0.2"
+    "tsx": "^4.23.12",
+    "typescript": "~6.0.3"
   }
 }

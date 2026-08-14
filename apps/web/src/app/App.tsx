@@ -145,20 +145,11 @@ export default function App() {
         <button className="icon-button" onClick={() => setSettingsOpen(true)} aria-label="Open settings">⚙</button>
       </header>
 
-      <section className="conversation glass-panel" aria-live="polite">
-        {visibleMessages.length === 0 ? (
+      {visibleMessages.length === 0 && (
+        <section className="conversation glass-panel" aria-live="polite">
           <div className="empty-copy"><p className="eyebrow">READY WHEN YOU ARE</p><h1>Start a conversation</h1><p>Type a message or use the microphone.</p></div>
-        ) : (
-          <div className="message-list">
-            {visibleMessages.slice(-8).map((message, index) => (
-              <div className={`message ${message.role}`} key={`${index}-${message.content.slice(0, 12)}`}>
-                <span>{message.role === "user" ? "User" : "Assistant"}</span>
-                <p>{message.content || "…"}</p>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+        </section>
+      )}
 
       {settings.subtitlesEnabled && subtitle && <div className="subtitle">{subtitle}</div>}
 
@@ -176,6 +167,7 @@ export default function App() {
       {settingsOpen ? (
         <Suspense fallback={<div className="settings-loading">Loading settings…</div>}>
           <SettingsPanel open onClose={() => setSettingsOpen(false)}
+            messages={visibleMessages}
             onTestStt={() => void startListening()}
             onTestTts={() => speechQueueRef.current?.enqueue("Hello, this is a speech synthesis test.")} />
         </Suspense>

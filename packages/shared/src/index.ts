@@ -63,11 +63,10 @@ export interface AppSettings {
 }
 
 export const stageLayoutIds = [
-  "full-body",
-  "medium",
-  "close-up",
-  "medium-left",
-  "medium-right",
+  "half-body-left",
+  "half-body-right",
+  "full-body-center",
+  "half-body-center",
 ] as const;
 export type StageLayoutId = (typeof stageLayoutIds)[number];
 

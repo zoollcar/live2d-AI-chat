@@ -4,44 +4,43 @@ export const live2dCatalog = {
   id: "ice-girl",
   name: "Default Model",
   source: "/models/ice-girl/model.model3.json",
-  expressions: {
-    wink: "Wink",
-    "smirk-left": "←歪嘴",
-    surprised: "惊讶",
-    gamepad: "手柄",
-    "hair-down": "披发",
-    "star-eyes": "星星眼",
-    "smirk-right": "歪嘴→",
-    tears: "流泪",
-    "heart-eyes": "爱心眼",
-    "cat-ears": "猫耳",
-    crown: "王冠",
+  moods: {
+    happy: "Happy",
     angry: "生气",
     confused: "疑惑",
-    "eye-roll": "白眼",
-    blush: "脸红",
-    tongue: "舌头",
+    sad: "流泪",
+    surprised: "惊讶",
+    excited: "星星眼",
+    affectionate: "爱心眼",
+    skeptical: "白眼",
+    playful: "舌头",
   },
   actions: {
-    wave: { group: "Action", index: 0 },
-    flirt: { group: "Action", index: 1 },
+    wink: { group: "Action", index: 0 },
+    wave: { group: "Action", index: 1 },
+    think: { group: "Action", index: 2 },
   },
-  poses: {
-    neutral: { group: "Idle", index: 0 },
-    attentive: { group: "Idle", index: 1 },
-    playful: { group: "Idle_evil", index: 0 },
+  decorations: {
+    none: undefined,
+    "cat-ears": { parameter: "Param53", value: 1 },
+    crown: { parameter: "Param40", value: 1 },
+    wings: { parameter: "Param41", value: 1 },
+    gamepad: { parameter: "ShouBing", value: 1 },
+    livestream: { parameter: "JiaJu", value: 1 },
+    ponytail: { parameter: "Param51", value: 1 },
+    "hair-down": { parameter: "Param51", value: 2 },
   },
 } as const;
 
-export type ExpressionId = keyof typeof live2dCatalog.expressions;
+export type MoodId = "neutral" | keyof typeof live2dCatalog.moods;
+export type DecorationId = keyof typeof live2dCatalog.decorations;
 export type ActionId = keyof typeof live2dCatalog.actions;
-export type PoseId = keyof typeof live2dCatalog.poses;
 
 export interface SceneSnapshot {
   modelId: typeof live2dCatalog.id;
-  expression?: ExpressionId;
+  mood: MoodId;
+  decoration: DecorationId;
   action?: ActionId;
-  pose: PoseId;
   layout: StageLayoutId;
   viewport: { width: number; height: number };
 }

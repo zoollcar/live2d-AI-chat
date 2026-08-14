@@ -1,5 +1,6 @@
 import type { LlmSettings, SttSettings, TtsSettings } from "@live2d-chat/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ChatMessage } from "@/agent";
 import {
   downloadLocalModel,
   getLocalModelPartialProgress,
@@ -12,6 +13,7 @@ import { downloadVitsVoice, getVitsVoicePartialProgress, isVitsVoiceDownloaded }
 
 interface Props {
   open: boolean;
+  messages: ChatMessage[];
   onClose(): void;
   onTestStt(): void;
   onTestTts(): void;
@@ -64,7 +66,7 @@ const localVoices: Record<string, ModelOption[]> = {
   ],
 };
 
-export function SettingsPanel({ open, onClose, onTestStt, onTestTts }: Props) {
+export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }: Props) {
   const { settings, updateLlm, updateStt, updateTts, setSubtitlesEnabled, reset } = useSettingsStore();
   const [connectionStatus, setConnectionStatus] = useState("");
   const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
@@ -77,6 +79,7 @@ export function SettingsPanel({ open, onClose, onTestStt, onTestTts }: Props) {
   const [llmDownloadStatus, setLlmDownloadStatus] = useState("");
   const [voiceDownloadStatus, setVoiceDownloadStatus] = useState("");
   const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const llmAbortRef = useRef<AbortController | undefined>(undefined);
   const voiceAbortRef = useRef<AbortController | undefined>(undefined);
 
@@ -253,6 +256,14 @@ export function SettingsPanel({ open, onClose, onTestStt, onTestTts }: Props) {
           <button className="icon-button" onClick={onClose} aria-label="Close settings">×</button>
         </header>
 
+        <section className="settings-section history-setting">
+          <div>
+            <h3>Conversation</h3>
+            <span className="status-copy">{messages.length} message{messages.length === 1 ? "" : "s"} in this chat</span>
+          </div>
+          <button onClick={() => setHistoryOpen(true)}>View chat history</button>
+        </section>
+
         <section className="settings-section">
           <h3>Language model</h3>
           <Field label="Connection">
@@ -389,6 +400,29 @@ export function SettingsPanel({ open, onClose, onTestStt, onTestTts }: Props) {
           <button className="danger-button" onClick={reset}>Restore defaults</button>
         </section>
       </aside>
+
+      {historyOpen && (
+        <div className="history-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setHistoryOpen(false)}>
+          <section className="history-dialog" role="dialog" aria-modal="true" aria-labelledby="history-title">
+            <header className="history-header">
+              <div><p className="eyebrow">CURRENT CHAT</p><h2 id="history-title">Chat history</h2></div>
+              <button className="icon-button" onClick={() => setHistoryOpen(false)} aria-label="Close chat history">×</button>
+            </header>
+            {messages.length === 0 ? (
+              <div className="history-empty">No messages yet. Start a conversation to see it here.</div>
+            ) : (
+              <div className="history-list">
+                {messages.map((message, index) => (
+                  <article className={`history-message ${message.role}`} key={`${index}-${message.role}`}>
+                    <span>{message.role === "user" ? "User" : "Assistant"}</span>
+                    <p>{message.content || "…"}</p>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      )}
     </div>
   );
 }
