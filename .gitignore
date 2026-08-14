@@ -1,5 +1,6 @@
 # temp
 src-electron
+.vercel
 
 # local
 backend/public/sound
@@ -21,6 +22,12 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+.env.*
+!.env.example
+coverage
+playwright-report
+test-results
 
 # Editor directories and files
 .vscode/*

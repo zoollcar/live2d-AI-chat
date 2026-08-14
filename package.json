@@ -1,48 +1,36 @@
 {
-  "name": "live2d-chat",
+  "name": "live2d-ai-chat",
+  "version": "1.0.0",
   "private": true,
-  "version": "0.0.0",
   "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "lint": "eslint .",
-    "preview": "vite preview",
-    "tauri:dev": "pnpm tauri dev",
-    "tauri:build": "pnpm tauri build"
+  "packageManager": "pnpm@11.4.0",
+  "engines": {
+    "node": ">=22"
   },
-  "dependencies": {
-    "@diffusionstudio/vits-web": "^1.0.3",
-    "@mlc-ai/web-llm": "^0.2.74",
-    "@pixi/app": "^7.4.2",
-    "@pixi/ticker": "^7.4.2",
-    "@tauri-apps/plugin-shell": "^2.0.1",
-    "abort-controller": "^3.0.0",
-    "openai": "^4.68.1",
-    "pixi-live2d-display-lipsyncpatch": "0.5.0-ls-7",
-    "pixi.js": "^7.4.2",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-speech-recognition": "^3.10.0",
-    "regenerator-runtime": "^0.14.1",
-    "zustand": "^5.0.0"
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c cyan,magenta \"pnpm --filter @live2d-chat/api dev\" \"pnpm --filter @live2d-chat/web dev\"",
+    "build": "pnpm --filter @live2d-chat/shared build && pnpm --filter @live2d-chat/api build && pnpm --filter @live2d-chat/web build",
+    "start": "pnpm --filter @live2d-chat/api start",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build"
   },
   "devDependencies": {
-    "@eslint/js": "^9.9.0",
-    "@tauri-apps/cli": "^2.0.4",
-    "@types/react": "^18.3.3",
-    "@types/react-dom": "^18.3.0",
-    "@types/react-speech-recognition": "^3.9.5",
-    "@vitejs/plugin-react-swc": "^3.5.0",
-    "autoprefixer": "^10.4.20",
-    "eslint": "^9.9.0",
-    "eslint-plugin-react-hooks": "^5.1.0-rc.0",
-    "eslint-plugin-react-refresh": "^0.4.9",
-    "globals": "^15.9.0",
-    "postcss": "^8.4.47",
-    "tailwindcss": "^3.4.13",
-    "typescript": "^5.5.3",
-    "typescript-eslint": "^8.0.1",
-    "vite": "^5.4.1"
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.62.1",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^26.2.0",
+    "@vitest/coverage-v8": "^4.1.10",
+    "concurrently": "^10.0.4",
+    "eslint": "^10.8.1",
+    "globals": "^17.3.0",
+    "jsdom": "^30.0.1",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.67.0",
+    "vitest": "^4.1.10"
   }
 }

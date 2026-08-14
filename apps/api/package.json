@@ -1,0 +1,25 @@
+{
+  "name": "@live2d-chat/api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/app.ts",
+  "scripts": {
+    "dev": "tsx watch src/adapters/node.ts",
+    "build": "tsup src/adapters/node.ts src/adapters/vercel.ts --format esm --dts --clean --out-dir dist/server",
+    "start": "node dist/server/node.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "@live2d-chat/shared": "workspace:*",
+    "dotenv": "^17.2.3",
+    "hono": "^4.13.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.12",
+    "tsup": "^8.5.1",
+    "typescript": "~6.0.2"
+  }
+}
