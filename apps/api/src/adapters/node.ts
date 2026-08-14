@@ -24,7 +24,7 @@ if (existsSync(webRoot)) {
 
 const port = Number(process.env.PORT || 8787);
 const instance = serve({ fetch: server.fetch, port }, (info) => {
-  console.log(`Live2D AI Chat is running at http://localhost:${info.port}`);
+  console.log(`Live2D AI is running at http://localhost:${info.port}`);
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

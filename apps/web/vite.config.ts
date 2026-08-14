@@ -11,6 +11,7 @@ export default defineConfig({
         {
           src: "node_modules/@wllama/wllama/esm/wasm/wllama.wasm",
           dest: "wllama",
+          rename: { stripBase: true },
         },
       ],
     }),

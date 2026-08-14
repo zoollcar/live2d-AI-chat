@@ -7,10 +7,6 @@ import { createSceneToolRegistry } from "./tools";
 import type { AgentRunOptions, AgentRuntime } from "./types";
 import { downloadLocalModel, getLocalModelConfig } from "./local-models";
 
-const localSystemPrompt = `You are a lively Live2D character. Keep replies conversational.
-You may call the provided tools to control your expression, action, pose, or stage layout.
-After tools finish, continue with a natural answer.`;
-
 export class LocalAgentRuntime implements AgentRuntime {
   private engine?: Wllama;
   private loadedModelId?: string;
@@ -20,10 +16,7 @@ export class LocalAgentRuntime implements AgentRuntime {
     try {
       const engine = await this.getEngine(options);
       const registry = createSceneToolRegistry(scene, emit);
-      const messages: ChatCompletionMessage[] = [
-        { role: "system", content: localSystemPrompt },
-        ...options.messages.filter((message) => message.role !== "system"),
-      ];
+      const messages: ChatCompletionMessage[] = [...options.messages];
 
       for (let step = 0; step < 5 && !signal.aborted; step += 1) {
         const stream = await engine.createChatCompletion({
@@ -95,15 +88,15 @@ export class LocalAgentRuntime implements AgentRuntime {
     });
     engine.setCompat("default");
     const model = getLocalModelConfig(options.settings.modelId);
-    options.emit({ type: "status", message: "正在准备本地语言模型…", progress: 0 });
+    options.emit({ type: "status", message: "Preparing the local language model…", progress: 0 });
     await downloadLocalModel(options.settings.modelId, (progress) => {
       options.emit({
         type: "status",
-        message: `正在下载本地语言模型… ${Math.round(progress * 100)}%`,
+        message: `Downloading the local language model… ${Math.round(progress * 100)}%`,
         progress,
       });
     }, options.signal);
-    options.emit({ type: "status", message: "正在加载本地语言模型…", progress: 1 });
+    options.emit({ type: "status", message: "Loading the local language model…", progress: 1 });
     await engine.loadModelFromHF(
       model,
       {
@@ -113,7 +106,7 @@ export class LocalAgentRuntime implements AgentRuntime {
           const progress = total ? loaded / total : 0;
           options.emit({
             type: "status",
-            message: `正在加载本地语言模型… ${Math.round(progress * 100)}%`,
+            message: `Loading the local language model… ${Math.round(progress * 100)}%`,
             progress,
           });
         },

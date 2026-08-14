@@ -39,7 +39,7 @@ export async function downloadToOpfs(
   }
   const response = await fetch(url, { headers, signal });
   if (response.status === 416 && remote.total > 0 && existing === remote.total) return remote;
-  if (!response.ok || !response.body) throw new Error(`下载失败：HTTP ${response.status}`);
+  if (!response.ok || !response.body) throw new Error(`Download failed: HTTP ${response.status}`);
 
   const resumed = existing > 0 && response.status === 206;
   if (!resumed) existing = 0;
@@ -62,12 +62,12 @@ export async function downloadToOpfs(
     await writable.close();
   }
 
-  if (total > 0 && loaded !== total) throw new Error(`下载不完整（${loaded}/${total} 字节）`);
+  if (total > 0 && loaded !== total) throw new Error(`Incomplete download (${loaded}/${total} bytes)`);
   return { total: total || loaded, etag: response.headers.get("etag") || remote.etag };
 }
 
 async function getDirectory(name: string) {
-  if (!navigator.storage?.getDirectory) throw new Error("当前浏览器不支持模型文件存储。");
+  if (!navigator.storage?.getDirectory) throw new Error("This browser does not support model file storage.");
   const root = await navigator.storage.getDirectory();
   return root.getDirectoryHandle(name, { create: true });
 }
@@ -83,7 +83,7 @@ async function getStoredSize(directory: string, fileName: string) {
 
 async function getRemoteInfo(url: string, signal?: AbortSignal) {
   const response = await fetch(url, { method: "HEAD", signal });
-  if (!response.ok) throw new Error(`无法读取模型信息：HTTP ${response.status}`);
+  if (!response.ok) throw new Error(`Unable to read model information: HTTP ${response.status}`);
   return {
     total: Number(response.headers.get("content-length") || 0),
     etag: response.headers.get("etag") || "",

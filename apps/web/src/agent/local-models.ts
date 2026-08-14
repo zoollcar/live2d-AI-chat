@@ -12,24 +12,24 @@ export interface LocalModelPreset {
 export const localModelPresets: LocalModelPreset[] = [
   {
     id: "unsloth/Qwen3.5-0.8B-GGUF",
-    label: "Qwen 3.5 0.8B · 轻量推荐",
+    label: "Qwen 3.5 0.8B · Lightweight, recommended",
     repo: "unsloth/Qwen3.5-0.8B-GGUF",
     quant: "Q4_K_M",
-    size: "约 533 MB",
+    size: "About 533 MB",
   },
   {
     id: "unsloth/Qwen3-1.7B-GGUF",
-    label: "Qwen 3 1.7B · 效果均衡",
+    label: "Qwen 3 1.7B · Balanced",
     repo: "unsloth/Qwen3-1.7B-GGUF",
     quant: "Q4_K_M",
-    size: "约 1.11 GB",
+    size: "About 1.11 GB",
   },
   {
     id: "unsloth/Qwen3.5-2B-GGUF",
-    label: "Qwen 3.5 2B · 更高质量",
+    label: "Qwen 3.5 2B · Higher quality",
     repo: "unsloth/Qwen3.5-2B-GGUF",
     quant: "Q4_K_M",
-    size: "约 1.3 GB",
+    size: "About 1.3 GB",
   },
 ];
 

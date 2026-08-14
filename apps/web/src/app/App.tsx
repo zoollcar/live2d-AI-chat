@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createAgentRuntime, type AgentEvent, type ChatMessage } from "@/agent";
+import { SYSTEM_MESSAGE } from "@/agent/system-prompt";
 import { useSettingsStore } from "@/infrastructure/config/store";
 import { createSttProvider, type SpeechRecognitionProvider } from "@/interaction/stt";
 import { SpeechQueue } from "@/interaction/speech/speech-queue";
@@ -11,18 +12,13 @@ import { Live2DStage } from "@/presentation/stage/Live2DStage";
 const SettingsPanel = lazy(() => import("@/presentation/settings/SettingsPanel")
   .then((module) => ({ default: module.SettingsPanel })));
 
-const systemMessage: ChatMessage = {
-  role: "system",
-  content: "You are a playful Live2D companion. Be concise, warm, subjective, and entertaining.",
-};
-
 export default function App() {
   const { settings, hydrated, hydrateSecrets } = useSettingsStore();
   const [scene, setScene] = useState<SceneController>();
-  const [messages, setMessages] = useState<ChatMessage[]>([systemMessage]);
+  const [messages, setMessages] = useState<ChatMessage[]>([SYSTEM_MESSAGE]);
   const [input, setInput] = useState("");
-  const [subtitle, setSubtitle] = useState("正在载入 Ice Girl…");
-  const [status, setStatus] = useState("初始化舞台");
+  const [subtitle, setSubtitle] = useState("Loading the Live2D model…");
+  const [status, setStatus] = useState("Initializing stage");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [listening, setListening] = useState(false);
   const [running, setRunning] = useState(false);
@@ -66,7 +62,7 @@ export default function App() {
     setMessages([...history, { role: "assistant", content: "" }]);
     setInput("");
     setSubtitle(text);
-    setStatus("AI 正在思考");
+    setStatus("AI is thinking");
     setRunning(true);
     const runtime = createAgentRuntime(settings.llm);
 
@@ -82,14 +78,14 @@ export default function App() {
       } else if (event.type === "status") {
         setStatus(event.message);
       } else if (event.type === "tool-call") {
-        setStatus(`执行工具：${event.name}`);
+        setStatus(`Running tool: ${event.name}`);
       } else if (event.type === "error") {
-        setStatus(`错误：${event.error.message}`);
+        setStatus(`Error: ${event.error.message}`);
         setRunning(false);
       } else if (event.type === "done") {
         const remaining = segmenterRef.current.flush();
         if (remaining) speechQueueRef.current?.enqueue(remaining);
-        setStatus("就绪");
+        setStatus("Ready");
         setRunning(false);
       }
     };
@@ -111,15 +107,15 @@ export default function App() {
         },
         onStatus: (next) => {
           setListening(next === "listening");
-          setStatus(next === "processing" ? "正在识别语音" : next === "listening" ? "正在聆听" : "就绪");
+          setStatus(next === "processing" ? "Transcribing speech" : next === "listening" ? "Listening" : "Ready");
         },
         onError: (error) => {
-          setStatus(`语音识别错误：${error.message}`);
+          setStatus(`Speech recognition error: ${error.message}`);
           setListening(false);
         },
       });
     } catch (error) {
-      setStatus(`语音识别错误：${error instanceof Error ? error.message : "不可用"}`);
+      setStatus(`Speech recognition error: ${error instanceof Error ? error.message : "Unavailable"}`);
     }
   }, [cancelCurrent, sendMessage, settings.stt]);
 
@@ -130,12 +126,12 @@ export default function App() {
 
   const onStageReady = useCallback((controller: SceneController) => {
     setScene(controller);
-    setSubtitle("你好，想聊点什么？");
-    setStatus("就绪");
+    setSubtitle("");
+    setStatus("Ready");
   }, []);
 
   const onStageError = useCallback((error: Error) => {
-    setStatus(`模型载入失败：${error.message}`);
+    setStatus(`Model failed to load: ${error.message}`);
   }, []);
 
   return (
@@ -145,18 +141,18 @@ export default function App() {
       <Live2DStage onReady={onStageReady} onError={onStageError} />
 
       <header className="top-bar glass-panel">
-        <div className="brand"><span className="brand-mark">L2</span><div><strong>Live2D AI Chat</strong><small>{status}</small></div></div>
-        <button className="icon-button" onClick={() => setSettingsOpen(true)} aria-label="打开设置">⚙</button>
+        <div className="brand"><span className="brand-mark">L2</span><div><strong>Live2D AI</strong><small>{status}</small></div></div>
+        <button className="icon-button" onClick={() => setSettingsOpen(true)} aria-label="Open settings">⚙</button>
       </header>
 
       <section className="conversation glass-panel" aria-live="polite">
         {visibleMessages.length === 0 ? (
-          <div className="empty-copy"><p className="eyebrow">READY WHEN YOU ARE</p><h1>和 Ice Girl 聊聊天</h1><p>可以打字，也可以按住舞台下方的麦克风开始说话。</p></div>
+          <div className="empty-copy"><p className="eyebrow">READY WHEN YOU ARE</p><h1>Start a conversation</h1><p>Type a message or use the microphone.</p></div>
         ) : (
           <div className="message-list">
             {visibleMessages.slice(-8).map((message, index) => (
               <div className={`message ${message.role}`} key={`${index}-${message.content.slice(0, 12)}`}>
-                <span>{message.role === "user" ? "你" : "Ice Girl"}</span>
+                <span>{message.role === "user" ? "User" : "Assistant"}</span>
                 <p>{message.content || "…"}</p>
               </div>
             ))}
@@ -167,21 +163,21 @@ export default function App() {
       {settings.subtitlesEnabled && subtitle && <div className="subtitle">{subtitle}</div>}
 
       <form className="composer glass-panel" onSubmit={(event) => { event.preventDefault(); void sendMessage(input); }}>
-        <button type="button" className={`mic-button ${listening ? "active" : ""}`} onClick={() => void (listening ? stopListening() : startListening())} aria-label={listening ? "停止识别" : "开始识别"}>●</button>
+        <button type="button" className={`mic-button ${listening ? "active" : ""}`} onClick={() => void (listening ? stopListening() : startListening())} aria-label={listening ? "Stop listening" : "Start listening"}>●</button>
         <textarea rows={1} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();
             void sendMessage(input);
           }
-        }} placeholder="输入消息…" />
+        }} placeholder="Type a message…" />
         {running ? <button type="button" className="send-button stop" onClick={cancelCurrent}>■</button> : <button className="send-button" disabled={!scene || !input.trim()}>↑</button>}
       </form>
 
       {settingsOpen ? (
-        <Suspense fallback={<div className="settings-loading">正在加载设置…</div>}>
+        <Suspense fallback={<div className="settings-loading">Loading settings…</div>}>
           <SettingsPanel open onClose={() => setSettingsOpen(false)}
             onTestStt={() => void startListening()}
-            onTestTts={() => speechQueueRef.current?.enqueue("你好，这是语音合成测试。")} />
+            onTestTts={() => speechQueueRef.current?.enqueue("Hello, this is a speech synthesis test.")} />
         </Suspense>
       ) : null}
     </main>

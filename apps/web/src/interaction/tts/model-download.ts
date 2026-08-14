@@ -14,7 +14,7 @@ export async function downloadVitsVoice(
   signal?: AbortSignal,
 ) {
   const path = voicePaths[voiceId];
-  if (!path) throw new Error("这个声音暂不支持断点续传。");
+  if (!path) throw new Error("Resumable downloads are not supported for this voice.");
   const modelUrl = `${baseUrl}/${path}`;
   const configUrl = `${modelUrl}.json`;
   const modelName = path.split("/").at(-1) || `${voiceId}.onnx`;

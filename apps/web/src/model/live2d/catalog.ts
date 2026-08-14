@@ -2,7 +2,7 @@ import type { StageLayoutId } from "@live2d-chat/shared";
 
 export const live2dCatalog = {
   id: "ice-girl",
-  name: "Ice Girl",
+  name: "Default Model",
   source: "/models/ice-girl/model.model3.json",
   expressions: {
     wink: "Wink",

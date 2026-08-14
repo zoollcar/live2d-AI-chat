@@ -25,42 +25,42 @@ interface ModelOption {
 const customValue = "__custom__";
 const languages = [
   { label: "English", value: "en-US" },
-  { label: "中文", value: "zh-CN" },
+  { label: "Chinese", value: "zh-CN" },
 ];
 const llmUrlPresets = [
-  { label: "项目内 Hono 代理", value: "/api/llm/v1" },
+  { label: "Built-in Hono proxy", value: "/api/llm/v1" },
   { label: "OpenAI", value: "https://api.openai.com/v1" },
   { label: "Ollama", value: "http://127.0.0.1:11434/v1" },
   { label: "LM Studio", value: "http://127.0.0.1:1234/v1" },
 ] as const;
 const openAiLlmModels: ModelOption[] = [
-  { label: "GPT-4.1 mini · 推荐", value: "gpt-4.1-mini" },
-  { label: "GPT-4o mini · 经济快速", value: "gpt-4o-mini" },
-  { label: "GPT-4.1 · 更高质量", value: "gpt-4.1" },
+  { label: "GPT-4.1 mini · Recommended", value: "gpt-4.1-mini" },
+  { label: "GPT-4o mini · Fast and economical", value: "gpt-4o-mini" },
+  { label: "GPT-4.1 · Higher quality", value: "gpt-4.1" },
 ];
 const ollamaModels: ModelOption[] = [
-  { label: "Qwen 3.5 0.8B · 轻量", value: "qwen3.5:0.8b" },
-  { label: "Qwen 3 1.7B · 均衡", value: "qwen3:1.7b" },
-  { label: "Llama 3.2 1B · 轻量", value: "llama3.2:1b" },
+  { label: "Qwen 3.5 0.8B · Lightweight", value: "qwen3.5:0.8b" },
+  { label: "Qwen 3 1.7B · Balanced", value: "qwen3:1.7b" },
+  { label: "Llama 3.2 1B · Lightweight", value: "llama3.2:1b" },
 ];
 const sttModels: ModelOption[] = [
-  { label: "GPT-4o mini Transcribe · 推荐", value: "gpt-4o-mini-transcribe" },
-  { label: "GPT-4o Transcribe · 更高质量", value: "gpt-4o-transcribe" },
-  { label: "Whisper 1 · 兼容", value: "whisper-1" },
+  { label: "GPT-4o mini Transcribe · Recommended", value: "gpt-4o-mini-transcribe" },
+  { label: "GPT-4o Transcribe · Higher quality", value: "gpt-4o-transcribe" },
+  { label: "Whisper 1 · Compatible", value: "whisper-1" },
 ];
 const ttsModels: ModelOption[] = [
-  { label: "GPT-4o mini TTS · 推荐", value: "gpt-4o-mini-tts" },
-  { label: "TTS 1 · 低延迟", value: "tts-1" },
-  { label: "TTS 1 HD · 高质量", value: "tts-1-hd" },
+  { label: "GPT-4o mini TTS · Recommended", value: "gpt-4o-mini-tts" },
+  { label: "TTS 1 · Low latency", value: "tts-1" },
+  { label: "TTS 1 HD · Higher quality", value: "tts-1-hd" },
 ];
 const localVoices: Record<string, ModelOption[]> = {
   "en-US": [
-    { label: "HFC Female · 推荐", value: "en_US-hfc_female-medium" },
+    { label: "HFC Female · Recommended", value: "en_US-hfc_female-medium" },
     { label: "HFC Male", value: "en_US-hfc_male-medium" },
   ],
   "zh-CN": [
-    { label: "华燕 · 标准", value: "zh_CN-huayan-medium" },
-    { label: "华燕 · 轻量", value: "zh_CN-huayan-x_low" },
+    { label: "Huayan · Standard", value: "zh_CN-huayan-medium" },
+    { label: "Huayan · Lightweight", value: "zh_CN-huayan-x_low" },
   ],
 };
 
@@ -173,17 +173,17 @@ export function SettingsPanel({ open, onClose, onTestStt, onTestTts }: Props) {
 
   const testConnection = async () => {
     if (settings.llm.transport === "local") {
-      setConnectionStatus("正在检查模型文件…");
+      setConnectionStatus("Checking model files…");
       try {
         const downloaded = await isLocalModelDownloaded(settings.llm.modelId);
         setLocalDownloaded((current) => ({ ...current, [settings.llm.modelId]: downloaded }));
-        setConnectionStatus(downloaded ? "测试通过：模型文件完整，可以加载。" : "模型尚未下载，请先点击下载模型。");
+        setConnectionStatus(downloaded ? "Test passed: the model files are complete and ready to load." : "The model has not been downloaded yet.");
       } catch (error) {
-        setConnectionStatus(`检查失败：${error instanceof Error ? error.message : "未知错误"}`);
+        setConnectionStatus(`Check failed: ${error instanceof Error ? error.message : "Unknown error"}`);
       }
       return;
     }
-    setConnectionStatus("正在连接…");
+    setConnectionStatus("Connecting…");
     try {
       const response = await fetch(`${normalizeBaseUrl(settings.llm.baseUrl)}/models`, {
         headers: settings.llm.apiKey ? { authorization: `Bearer ${settings.llm.apiKey}` } : undefined,
@@ -192,9 +192,9 @@ export function SettingsPanel({ open, onClose, onTestStt, onTestTts }: Props) {
       const payload = (await response.json()) as { data?: Array<{ id?: string }> };
       const ids = payload.data?.flatMap((model) => (model.id ? [model.id] : [])) || [];
       setDiscoveredModels(ids);
-      setConnectionStatus(`连接成功，发现 ${ids.length} 个可用模型。`);
+      setConnectionStatus(`Connected. Found ${ids.length} available model${ids.length === 1 ? "" : "s"}.`);
     } catch (error) {
-      setConnectionStatus(`连接失败：${error instanceof Error ? error.message : "未知错误"}`);
+      setConnectionStatus(`Connection failed: ${error instanceof Error ? error.message : "Unknown error"}`);
     }
   };
 
@@ -203,17 +203,17 @@ export function SettingsPanel({ open, onClose, onTestStt, onTestTts }: Props) {
     const controller = new AbortController();
     llmAbortRef.current = controller;
     setLlmProgress(llmResumeProgress);
-    setLlmDownloadStatus(llmResumeProgress > 0 ? "正在从断点继续下载…" : "正在准备语言模型下载…");
+    setLlmDownloadStatus(llmResumeProgress > 0 ? "Resuming the download…" : "Preparing the language model download…");
     try {
       await downloadLocalModel(settings.llm.modelId, setLlmProgress, controller.signal);
       setLocalDownloaded((current) => ({ ...current, [settings.llm.modelId]: true }));
       setLlmResumeProgress(0);
-      setLlmDownloadStatus("语言模型已下载并保存到浏览器。");
+      setLlmDownloadStatus("The language model has been downloaded and saved in your browser.");
     } catch (error) {
       if (controller.signal.aborted) {
-        setLlmDownloadStatus("下载已暂停，已保存当前进度。");
+        setLlmDownloadStatus("Download paused. Your progress has been saved.");
       } else {
-        setLlmDownloadStatus(`下载失败：${error instanceof Error ? error.message : "未知错误"}`);
+        setLlmDownloadStatus(`Download failed: ${error instanceof Error ? error.message : "Unknown error"}`);
       }
     } finally {
       llmAbortRef.current = undefined;
@@ -226,17 +226,17 @@ export function SettingsPanel({ open, onClose, onTestStt, onTestTts }: Props) {
     const controller = new AbortController();
     voiceAbortRef.current = controller;
     setVoiceProgress(voiceResumeProgress);
-    setVoiceDownloadStatus(voiceResumeProgress > 0 ? "正在从断点继续下载声音模型…" : "正在下载语音模型…");
+    setVoiceDownloadStatus(voiceResumeProgress > 0 ? "Resuming the voice model download…" : "Downloading the voice model…");
     try {
       await downloadVitsVoice(settings.tts.voice, setVoiceProgress, controller.signal);
       setVoiceDownloaded((current) => ({ ...current, [settings.tts.voice]: true }));
       setVoiceResumeProgress(0);
-      setVoiceDownloadStatus("语音模型已下载并保存到浏览器。");
+      setVoiceDownloadStatus("The voice model has been downloaded and saved in your browser.");
     } catch (error) {
       if (controller.signal.aborted) {
-        setVoiceDownloadStatus("下载已暂停，已保存当前进度。");
+        setVoiceDownloadStatus("Download paused. Your progress has been saved.");
       } else {
-        setVoiceDownloadStatus(`下载失败：${error instanceof Error ? error.message : "未知错误"}`);
+        setVoiceDownloadStatus(`Download failed: ${error instanceof Error ? error.message : "Unknown error"}`);
       }
     } finally {
       voiceAbortRef.current = undefined;
@@ -247,15 +247,15 @@ export function SettingsPanel({ open, onClose, onTestStt, onTestTts }: Props) {
 
   return (
     <div className="settings-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <aside className="settings-panel" aria-label="设置">
+      <aside className="settings-panel" aria-label="Settings">
         <header className="settings-header">
-          <div><p className="eyebrow">CONFIGURATION</p><h2>设置</h2></div>
-          <button className="icon-button" onClick={onClose} aria-label="关闭设置">×</button>
+          <div><p className="eyebrow">CONFIGURATION</p><h2>Settings</h2></div>
+          <button className="icon-button" onClick={onClose} aria-label="Close settings">×</button>
         </header>
 
         <section className="settings-section">
-          <h3>语言模型</h3>
-          <Field label="连接方式">
+          <h3>Language model</h3>
+          <Field label="Connection">
             <select value={settings.llm.transport} onChange={(event) => {
               const transport = event.target.value as LlmSettings["transport"];
               updateLlm({
@@ -269,19 +269,19 @@ export function SettingsPanel({ open, onClose, onTestStt, onTestTts }: Props) {
               });
               setConnectionStatus("");
             }}>
-              <option value="proxy">Hono 代理</option>
-              <option value="direct">OpenAI-compatible 直连</option>
-              <option value="local">浏览器本地 wllama</option>
+              <option value="proxy">Built-in Hono proxy</option>
+              <option value="direct">Direct OpenAI-compatible API</option>
+              <option value="local">Local wllama in the browser</option>
             </select>
           </Field>
           {settings.llm.transport !== "local" && (
             <>
-              <Field label="URL 预设">
+              <Field label="URL preset">
                 <select value={llmUrlPresets.some(({ value }) => value === settings.llm.baseUrl) ? settings.llm.baseUrl : customValue} onChange={(event) => {
                   if (event.target.value !== customValue) updateLlm({ baseUrl: event.target.value });
                 }}>
                   {llmUrlPresets.map((preset) => <option key={preset.value} value={preset.value}>{preset.label}</option>)}
-                  <option value={customValue}>自定义 OpenAI-compatible</option>
+                  <option value={customValue}>Custom OpenAI-compatible API</option>
                 </select>
               </Field>
               <Field label="API URL"><input value={settings.llm.baseUrl} onChange={(event) => updateLlm({ baseUrl: event.target.value })} /></Field>
@@ -289,7 +289,7 @@ export function SettingsPanel({ open, onClose, onTestStt, onTestTts }: Props) {
             </>
           )}
           <ModelChoiceField
-            label="模型"
+            label="Model"
             value={settings.llm.modelId}
             options={llmOptions}
             downloaded={settings.llm.transport === "local" ? localDownloaded : undefined}
@@ -299,46 +299,46 @@ export function SettingsPanel({ open, onClose, onTestStt, onTestTts }: Props) {
           {settings.llm.transport === "local" && <DownloadProgress progress={llmProgress ?? (llmResumeProgress || undefined)} status={llmDownloadStatus} />}
           <div className="settings-actions">
             {settings.llm.transport === "local" && (llmProgress === undefined
-              ? <button className="primary-button" onClick={() => void downloadLlm()}>{llmResumeProgress > 0 ? "▶ 继续下载" : "↓ 下载模型"}</button>
-              : <button className="pause-button" onClick={() => llmAbortRef.current?.abort()}>Ⅱ 暂停下载</button>)}
-            <button onClick={() => void testConnection()}>测试连接</button>
+              ? <button className="primary-button" onClick={() => void downloadLlm()}>{llmResumeProgress > 0 ? "▶ Resume download" : "↓ Download model"}</button>
+              : <button className="pause-button" onClick={() => llmAbortRef.current?.abort()}>Ⅱ Pause download</button>)}
+            <button onClick={() => void testConnection()}>Test connection</button>
           </div>
           {connectionStatus && <span className="status-copy" role="status">{connectionStatus}</span>}
         </section>
 
         <section className="settings-section">
-          <h3>语音识别</h3>
+          <h3>Speech recognition</h3>
           <Field label="Provider">
             <select value={settings.stt.provider} onChange={(event) => updateStt({ provider: event.target.value as SttSettings["provider"] })}>
-              <option value="web-speech">浏览器 Web Speech</option>
+              <option value="web-speech">Browser Web Speech</option>
               <option value="openai-compatible">OpenAI-compatible</option>
             </select>
           </Field>
           {settings.stt.provider === "openai-compatible" && (
             <>
               <Field label="API URL"><input value={settings.stt.baseUrl} onChange={(event) => updateStt({ baseUrl: event.target.value })} /></Field>
-              <ModelChoiceField label="模型" value={settings.stt.modelId} options={sttModels} searchUrl={modelWebSearch} onChange={(modelId) => updateStt({ modelId })} />
+              <ModelChoiceField label="Model" value={settings.stt.modelId} options={sttModels} searchUrl={modelWebSearch} onChange={(modelId) => updateStt({ modelId })} />
               <SecretField value={settings.stt.apiKey} remember={settings.stt.rememberApiKey} onChange={(apiKey) => updateStt({ apiKey })} onRemember={(rememberApiKey) => updateStt({ rememberApiKey })} />
             </>
           )}
           <LanguageField value={settings.stt.language} onChange={(language) => updateStt({ language })} />
-          <label className="toggle-row"><input type="checkbox" checked={settings.stt.continuous} onChange={(event) => updateStt({ continuous: event.target.checked })} />连续识别</label>
-          <button onClick={onTestStt}>测试识别</button>
+          <label className="toggle-row"><input type="checkbox" checked={settings.stt.continuous} onChange={(event) => updateStt({ continuous: event.target.checked })} />Continuous recognition</label>
+          <button onClick={onTestStt}>Test recognition</button>
         </section>
 
         <section className="settings-section">
-          <h3>语音合成</h3>
+          <h3>Speech synthesis</h3>
           <Field label="Provider">
             <select value={settings.tts.provider} onChange={(event) => updateTts({ provider: event.target.value as TtsSettings["provider"] })}>
-              <option value="vits-local">本地 VITS</option>
-              <option value="browser-speech">浏览器 Speech Synthesis</option>
+              <option value="vits-local">Local VITS</option>
+              <option value="browser-speech">Browser Speech Synthesis</option>
               <option value="openai-compatible">OpenAI-compatible</option>
             </select>
           </Field>
           {settings.tts.provider === "openai-compatible" && (
             <>
               <Field label="API URL"><input value={settings.tts.baseUrl} onChange={(event) => updateTts({ baseUrl: event.target.value })} /></Field>
-              <ModelChoiceField label="模型" value={settings.tts.modelId} options={ttsModels} searchUrl={modelWebSearch} onChange={(modelId) => updateTts({ modelId })} />
+              <ModelChoiceField label="Model" value={settings.tts.modelId} options={ttsModels} searchUrl={modelWebSearch} onChange={(modelId) => updateTts({ modelId })} />
               <SecretField value={settings.tts.apiKey} remember={settings.tts.rememberApiKey} onChange={(apiKey) => updateTts({ apiKey })} onRemember={(rememberApiKey) => updateTts({ rememberApiKey })} />
             </>
           )}
@@ -347,7 +347,7 @@ export function SettingsPanel({ open, onClose, onTestStt, onTestTts }: Props) {
             updateTts({ language, ...(settings.tts.provider === "vits-local" ? { voice } : {}) });
           }} />
           {settings.tts.provider === "vits-local" ? (
-            <Field label="声音模型">
+            <Field label="Voice model">
               <div className="select-with-status">
                 <select value={settings.tts.voice} onChange={(event) => updateTts({ voice: event.target.value })}>
                   {currentVoices.map((voice) => <option key={voice.value} value={voice.value}>{voice.label} {voiceDownloaded[voice.value] ? "✓" : "↓"}</option>)}
@@ -356,37 +356,37 @@ export function SettingsPanel({ open, onClose, onTestStt, onTestTts }: Props) {
               </div>
             </Field>
           ) : settings.tts.provider === "browser-speech" ? (
-            <Field label="浏览器声音">
+            <Field label="Browser voice">
               <select
                 value={selectedBrowserVoice?.voiceURI || ""}
                 onChange={(event) => updateTts({ voice: event.target.value })}
                 disabled={filteredBrowserVoices.length === 0}
               >
-                {filteredBrowserVoices.length === 0 && <option value="">当前浏览器没有该语言的声音</option>}
+                {filteredBrowserVoices.length === 0 && <option value="">No voice is available for this language</option>}
                 {filteredBrowserVoices.map((voice) => (
                   <option key={voice.voiceURI} value={voice.voiceURI}>
-                    {voice.name} · {voice.lang}{voice.default ? " · 默认" : ""}
+                    {voice.name} · {voice.lang}{voice.default ? " · Default" : ""}
                   </option>
                 ))}
               </select>
             </Field>
-          ) : <Field label="声音"><input value={settings.tts.voice} onChange={(event) => updateTts({ voice: event.target.value })} /></Field>}
+          ) : <Field label="Voice"><input value={settings.tts.voice} onChange={(event) => updateTts({ voice: event.target.value })} /></Field>}
           <div className="range-grid">
-            <Field label={`语速 ${settings.tts.rate.toFixed(1)}`}><input type="range" min="0.5" max="2" step="0.1" value={settings.tts.rate} onChange={(event) => updateTts({ rate: Number(event.target.value) })} /></Field>
-            <Field label={`音调 ${settings.tts.pitch.toFixed(1)}`}><input type="range" min="0.5" max="2" step="0.1" value={settings.tts.pitch} onChange={(event) => updateTts({ pitch: Number(event.target.value) })} /></Field>
+            <Field label={`Rate ${settings.tts.rate.toFixed(1)}`}><input type="range" min="0.5" max="2" step="0.1" value={settings.tts.rate} onChange={(event) => updateTts({ rate: Number(event.target.value) })} /></Field>
+            <Field label={`Pitch ${settings.tts.pitch.toFixed(1)}`}><input type="range" min="0.5" max="2" step="0.1" value={settings.tts.pitch} onChange={(event) => updateTts({ pitch: Number(event.target.value) })} /></Field>
           </div>
           {settings.tts.provider === "vits-local" && <DownloadProgress progress={voiceProgress ?? (voiceResumeProgress || undefined)} status={voiceDownloadStatus} />}
           <div className="settings-actions">
             {settings.tts.provider === "vits-local" && (voiceProgress === undefined
-              ? <button className="primary-button" onClick={() => void downloadVoice()}>{voiceResumeProgress > 0 ? "▶ 继续下载" : "↓ 下载声音"}</button>
-              : <button className="pause-button" onClick={() => voiceAbortRef.current?.abort()}>Ⅱ 暂停下载</button>)}
-            <button onClick={onTestTts}>测试发音</button>
+              ? <button className="primary-button" onClick={() => void downloadVoice()}>{voiceResumeProgress > 0 ? "▶ Resume download" : "↓ Download voice"}</button>
+              : <button className="pause-button" onClick={() => voiceAbortRef.current?.abort()}>Ⅱ Pause download</button>)}
+            <button onClick={onTestTts}>Test speech</button>
           </div>
         </section>
 
         <section className="settings-section compact">
-          <label className="toggle-row"><input type="checkbox" checked={settings.subtitlesEnabled} onChange={(event) => setSubtitlesEnabled(event.target.checked)} />显示字幕</label>
-          <button className="danger-button" onClick={reset}>恢复默认设置</button>
+          <label className="toggle-row"><input type="checkbox" checked={settings.subtitlesEnabled} onChange={(event) => setSubtitlesEnabled(event.target.checked)} />Show subtitles</label>
+          <button className="danger-button" onClick={reset}>Restore defaults</button>
         </section>
       </aside>
     </div>
@@ -407,14 +407,14 @@ function ModelChoiceField({ label, value, options, downloaded, searchUrl, onChan
       <div className="select-with-status">
         <select value={isPreset ? value : customValue} onChange={(event) => onChange(event.target.value === customValue ? "" : event.target.value)}>
           {options.map((option) => <option key={option.value} value={option.value}>{option.label}{downloaded ? ` ${downloaded[option.value] ? "✓" : "↓"}` : ""}</option>)}
-          <option value={customValue}>自定义模型…</option>
+          <option value={customValue}>Custom model…</option>
         </select>
         {downloaded && <ModelStatus downloaded={Boolean(downloaded[value])} />}
       </div>
       {!isPreset && (
         <div className="custom-model-row">
-          <input value={value} onChange={(event) => onChange(event.target.value)} placeholder="输入模型名字" />
-          <a className="search-button" href={searchUrl(value)} target="_blank" rel="noreferrer" aria-label="搜索可用模型" title="搜索可用模型">⌕</a>
+          <input value={value} onChange={(event) => onChange(event.target.value)} placeholder="Enter a model name" />
+          <a className="search-button" href={searchUrl(value)} target="_blank" rel="noreferrer" aria-label="Search for available models" title="Search for available models">⌕</a>
         </div>
       )}
     </Field>
@@ -422,7 +422,7 @@ function ModelChoiceField({ label, value, options, downloaded, searchUrl, onChan
 }
 
 function ModelStatus({ downloaded }: { downloaded: boolean }) {
-  return <span className={`model-status ${downloaded ? "downloaded" : "not-downloaded"}`} title={downloaded ? "已下载" : "未下载"} aria-label={downloaded ? "已下载" : "未下载"}>{downloaded ? "✓" : "↓"}</span>;
+  return <span className={`model-status ${downloaded ? "downloaded" : "not-downloaded"}`} title={downloaded ? "Downloaded" : "Not downloaded"} aria-label={downloaded ? "Downloaded" : "Not downloaded"}>{downloaded ? "✓" : "↓"}</span>;
 }
 
 function DownloadProgress({ progress, status }: { progress?: number; status: string }) {
@@ -436,7 +436,7 @@ function DownloadProgress({ progress, status }: { progress?: number; status: str
 }
 
 function LanguageField({ value, onChange }: { value: string; onChange(value: string): void }) {
-  return <Field label="语言"><select value={value} onChange={(event) => onChange(event.target.value)}>{languages.map((language) => <option key={language.value} value={language.value}>{language.label}</option>)}</select></Field>;
+  return <Field label="Language"><select value={value} onChange={(event) => onChange(event.target.value)}>{languages.map((language) => <option key={language.value} value={language.value}>{language.label}</option>)}</select></Field>;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -451,8 +451,8 @@ function SecretField({ value, remember, onChange, onRemember }: {
 }) {
   return (
     <>
-      <Field label="API Key"><input type="password" autoComplete="off" value={value} onChange={(event) => onChange(event.target.value)} placeholder="默认仅保存到当前标签页" /></Field>
-      <label className="toggle-row"><input type="checkbox" checked={remember} onChange={(event) => onRemember(event.target.checked)} />在本机记住密钥</label>
+      <Field label="API Key"><input type="password" autoComplete="off" value={value} onChange={(event) => onChange(event.target.value)} placeholder="Stored in this tab by default" /></Field>
+      <label className="toggle-row"><input type="checkbox" checked={remember} onChange={(event) => onRemember(event.target.checked)} />Remember this key on this device</label>
     </>
   );
 }
