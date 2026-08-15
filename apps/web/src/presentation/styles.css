@@ -29,6 +29,8 @@ button { cursor: pointer; }
 .mic-button, .send-button { flex: 0 0 46px; width: 46px; height: 46px; border: 0; border-radius: 16px; color: #fff; background: rgba(255,255,255,.1); }
 .mic-button { color: #e984b2; }
 .mic-button.active { color: #fff; background: #dc4e7e; box-shadow: 0 0 0 5px rgba(220,78,126,.18); }
+.mic-button.interrupting { color: #fff; background: rgba(255,255,255,.18); box-shadow: 0 0 0 5px rgba(255,255,255,.1); animation: mic-pulse 1.4s ease-in-out infinite; }
+@keyframes mic-pulse { 0%, 100% { box-shadow: 0 0 0 5px rgba(255,255,255,.1); } 50% { box-shadow: 0 0 0 10px rgba(255,255,255,.04); } }
 .send-button { background: linear-gradient(135deg,#ef77aa,#8068df); font-size: 24px; }
 .send-button:disabled { opacity: .35; cursor: not-allowed; }
 .send-button.stop { background: #cf476e; font-size: 14px; }

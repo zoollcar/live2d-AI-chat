@@ -3,6 +3,11 @@ export interface RecognitionCallbacks {
   onFinal(text: string): void;
   onStatus(status: "idle" | "listening" | "processing"): void;
   onError(error: Error): void;
+  // Fired when the recognition session ended on its own (no-speech timeout,
+  // empty-final noise, etc.) — as opposed to the user explicitly stopping it.
+  // The host can use this to reopen the session in continuous mode without
+  // having to guess whether Chrome is still alive.
+  onAutoEnd?(): void;
 }
 
 export interface SpeechRecognitionProvider {

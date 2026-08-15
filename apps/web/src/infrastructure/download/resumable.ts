@@ -8,9 +8,14 @@ export async function getPartialDownloadProgress(
   fileName: string,
   url: string,
 ): Promise<ResumableDownloadProgress> {
-  const existing = await getStoredSize(directory, fileName);
-  if (!existing) return { loaded: 0, total: 0 };
-  const remote = await getRemoteInfo(url).catch(() => ({ total: 0, etag: "" }));
+  // The remote size must be resolved even when nothing has been stored yet:
+  // callers use this total to size the overall progress bar before the first
+  // byte lands. Returning 0 here made a fresh download report 0% until it
+  // finished (or was paused, which finally created a partial file to measure).
+  const [existing, remote] = await Promise.all([
+    getStoredSize(directory, fileName),
+    getRemoteInfo(url).catch(() => ({ total: 0, etag: "" })),
+  ]);
   return { loaded: existing, total: remote.total };
 }
 
@@ -50,17 +55,47 @@ export async function downloadToOpfs(
 
   let loaded = existing;
   const reader = response.body.getReader();
+  // Coalesce per-chunk progress emissions onto the next animation frame so each
+  // onProgress call lands in its own execution context. This breaks React 18's
+  // automatic batching that would otherwise collapse thousands of setState calls
+  // into a single render after the download finishes. When requestAnimationFrame
+  // is unavailable (e.g. older workers or test runners without a DOM), fall
+  // back to a synchronous invocation so the callback still runs at all.
+  let pendingProgress: ResumableDownloadProgress | undefined;
+  let rafScheduled = false;
+  const hasRaf = typeof globalThis.requestAnimationFrame === "function";
+  const scheduleFrame: (cb: () => void) => void = hasRaf
+    ? globalThis.requestAnimationFrame.bind(globalThis)
+    : (cb) => { cb(); };
+  const flushProgress = () => {
+    rafScheduled = false;
+    const next = pendingProgress;
+    pendingProgress = undefined;
+    if (next) onProgress(next);
+  };
+  const queueProgress = (progress: ResumableDownloadProgress) => {
+    pendingProgress = progress;
+    if (rafScheduled) return;
+    rafScheduled = true;
+    scheduleFrame(flushProgress);
+  };
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       await writable.write(value);
       loaded += value.byteLength;
-      onProgress({ loaded, total });
+      queueProgress({ loaded, total });
     }
   } finally {
     await writable.close();
   }
+  // Ensure the UI reaches 100%. When at least one frame is still pending, that
+  // frame already carries the latest pendingProgress, so we just refresh it
+  // with the authoritative totals. When no frame is pending (e.g. empty body,
+  // instant resume, or zero-byte file), emit directly.
+  if (rafScheduled) pendingProgress = { loaded, total };
+  else onProgress({ loaded, total });
 
   if (total > 0 && loaded !== total) throw new Error(`Incomplete download (${loaded}/${total} bytes)`);
   return { total: total || loaded, etag: response.headers.get("etag") || remote.etag };

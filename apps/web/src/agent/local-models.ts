@@ -63,22 +63,34 @@ export async function downloadLocalModel(
   }
   const source = await getHFModelSource(getLocalModelConfig(modelId));
   const urls = ModelManager.parseModelUrl(source.url);
-  const remoteSizes = await Promise.all(urls.map(async (url) => {
+  const files = await Promise.all(urls.map(async (url) => {
     const key = await modelManager.cacheManager.getNameFromURL(url);
     const progress = await getPartialDownloadProgress("cache", key, url);
     return { url, key, total: progress.total };
   }));
-  const grandTotal = remoteSizes.reduce((sum, file) => sum + file.total, 0);
+  let grandTotal = files.reduce((sum, file) => sum + file.total, 0);
   let completed = 0;
-  for (const file of remoteSizes) {
-    const result = await downloadToOpfs("cache", file.key, file.url, ({ loaded }) => {
-      onProgress(grandTotal ? (completed + loaded) / grandTotal : 0);
+  for (const file of files) {
+    const result = await downloadToOpfs("cache", file.key, file.url, ({ loaded, total }) => {
+      // The authoritative size only arrives with the response headers, so keep the
+      // aggregate in sync instead of freezing the ratio when the pre-flight probe
+      // returned nothing.
+      if (total > 0 && total !== file.total) {
+        grandTotal += total - file.total;
+        file.total = total;
+      }
+      const denominator = grandTotal > 0 ? grandTotal : total;
+      onProgress(denominator > 0 ? Math.min((completed + loaded) / denominator, 1) : 0);
     }, signal);
     await modelManager.cacheManager.writeMetadata(file.key, {
       originalURL: file.url,
       originalSize: result.total,
       etag: result.etag.replace(/[^A-Za-z0-9]/g, ""),
     });
+    if (result.total > 0 && result.total !== file.total) {
+      grandTotal += result.total - file.total;
+      file.total = result.total;
+    }
     completed += result.total;
   }
   onProgress(1);
