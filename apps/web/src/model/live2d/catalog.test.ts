@@ -15,4 +15,14 @@ describe("Live2D catalog", () => {
       think: { group: "Action", index: 2 },
     });
   });
+
+  it("declares persistent behavioral states that map to existing motion groups", () => {
+    expect(live2dCatalog.states.idle.motionGroup).toBe("Idle");
+    expect(manifest.FileReferences.Motions.Idle).toBeDefined();
+
+    const sleepingParams = live2dCatalog.states.sleeping.parameters;
+    expect(sleepingParams).toContainEqual({ id: "ParamEyeLOpen", value: 0 });
+    expect(sleepingParams).toContainEqual({ id: "ParamEyeROpen", value: 0 });
+    expect(live2dCatalog.states.sleeping.blinkInterval).toEqual([0, 0]);
+  });
 });

@@ -12,18 +12,27 @@ export function createApp(config: ProxyConfig) {
     "/api/*",
     cors({
       origin: (origin) => (allowedOrigins.has(origin) ? origin : ""),
-      allowHeaders: ["authorization", "content-type"],
+      allowHeaders: ["authorization", "content-type", "x-llm-base-url"],
       allowMethods: ["GET", "POST", "OPTIONS"],
     }),
   );
 
   app.get("/api/health", (c) =>
-    c.json({ status: "ok", service: "live2d-chat-api", upstream: config.baseUrl }),
+    c.json({
+      status: "ok",
+      service: "live2d-chat-api",
+      upstreams: [...config.upstreams.values()].map((upstream) => upstream.id),
+    }),
   );
+
+  app.get("/api/llm/upstreams", (c) =>
+    c.json({ upstreams: [...config.upstreams.values()] }),
+  );
+
   app.get("/api/llm/v1/models", (c) => proxyModels(c, config));
   app.post("/api/llm/v1/chat/completions", (c) => proxyChat(c, config));
   app.all("/api/llm/*", (c) =>
-    c.json(apiError("not_found", "Only models and chat completions are proxied."), 404),
+    c.json(apiError("not_found", "Only upstreams, models, and chat completions are proxied."), 404),
   );
 
   app.onError((error, c) => {

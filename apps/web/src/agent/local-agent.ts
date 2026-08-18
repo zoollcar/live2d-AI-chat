@@ -7,6 +7,11 @@ import { createSceneToolRegistry } from "./tools";
 import type { AgentRunOptions, AgentRuntime } from "./types";
 import { downloadLocalModel, getLocalModelConfig } from "./local-models";
 
+// Upper bound on ReAct steps for a single user turn. Matches the remote
+// runtime so the user sees "step N of M" with the same scale regardless of
+// which inference backend is active.
+const MAX_STEPS = 5;
+
 export class LocalAgentRuntime implements AgentRuntime {
   private engine?: Wllama;
   private loadedModelId?: string;
@@ -18,7 +23,15 @@ export class LocalAgentRuntime implements AgentRuntime {
       const registry = createSceneToolRegistry(scene, emit);
       const messages: ChatCompletionMessage[] = [...options.messages];
 
-      for (let step = 0; step < 5 && !signal.aborted; step += 1) {
+      for (let step = 1; step <= MAX_STEPS && !signal.aborted; step += 1) {
+        // Surface the ReAct step boundary so the user can see the agent
+        // is on step 2 of 5 rather than appearing to hang on a single
+        // local inference (which can take many seconds on a phone).
+        emit({
+          type: "status",
+          kind: "busy",
+          message: `Reasoning (step ${step} of ${MAX_STEPS})…`,
+        });
         const stream = await engine.createChatCompletion({
           messages,
           tools: registry.wllamaTools as ChatCompletionTool[],
@@ -55,6 +68,9 @@ export class LocalAgentRuntime implements AgentRuntime {
           function: { name: call.name, arguments: call.arguments },
         }));
         messages.push({ role: "assistant", content: text || null, tool_calls: toolCalls });
+        // Reset batch tracking so the first performAction in this new
+        // assistant message preempts any actions still queued from earlier.
+        registry.resetBatch();
         for (const call of toolCalls) {
           const input = JSON.parse(call.function.arguments || "{}");
           const output = await registry.execute(call.function.name, input);
@@ -88,15 +104,16 @@ export class LocalAgentRuntime implements AgentRuntime {
     });
     engine.setCompat("default");
     const model = getLocalModelConfig(options.settings.modelId);
-    options.emit({ type: "status", message: "Preparing the local language model…", progress: 0 });
+    options.emit({ type: "status", kind: "progress", message: "Preparing the local language model…", progress: 0 });
     await downloadLocalModel(options.settings.modelId, (progress) => {
       options.emit({
         type: "status",
+        kind: "progress",
         message: `Downloading the local language model… ${Math.round(progress * 100)}%`,
         progress,
       });
     }, options.signal);
-    options.emit({ type: "status", message: "Loading the local language model…", progress: 1 });
+    options.emit({ type: "status", kind: "progress", message: "Loading the local language model…", progress: 1 });
     await engine.loadModelFromHF(
       model,
       {
@@ -106,6 +123,7 @@ export class LocalAgentRuntime implements AgentRuntime {
           const progress = total ? loaded / total : 0;
           options.emit({
             type: "status",
+            kind: "progress",
             message: `Loading the local language model… ${Math.round(progress * 100)}%`,
             progress,
           });

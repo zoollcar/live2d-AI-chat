@@ -4,10 +4,10 @@ export const defaultSettings: AppSettings = {
   version: 2,
   llm: {
     transport: "proxy",
-    baseUrl: "/api/llm/v1",
+    baseUrl: "https://api.openai.com/v1",
     apiKey: "",
     rememberApiKey: false,
-    modelId: "qwen3.5:0.8b",
+    modelId: "gpt-4.1-mini",
   },
   stt: {
     provider: "web-speech",

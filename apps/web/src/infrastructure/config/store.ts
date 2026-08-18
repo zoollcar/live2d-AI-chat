@@ -31,6 +31,18 @@ interface SettingsStore {
   reset(): void;
 }
 
+// Recognise URLs that point at the local Hono proxy itself rather than an
+// upstream. We used to ship a "Built-in Hono proxy" preset whose value was
+// `/api/llm/v1`, which made sense when the browser talked straight to the
+// upstream. After the runtime started sending the upstream URL via the
+// `X-LLM-Base-URL` header, this same value now gets forwarded to the proxy
+// and rejected by the allow list (`upstream_not_allowed`). Any URL that
+// starts with `/api/llm/` has the same problem.
+function isLocalProxyUrl(url: string): boolean {
+  const trimmed = url.trim().replace(/\/+$/, "");
+  return trimmed === "/api/llm/v1" || trimmed.startsWith("/api/llm/");
+}
+
 export const useSettingsStore = create<SettingsStore>()(
   persist(
     (set, get) => ({
@@ -84,7 +96,12 @@ export const useSettingsStore = create<SettingsStore>()(
     }),
     {
       name: "live2d-chat:settings:v2",
-      version: 2,
+      // Bumped from 2 → 3 so the `migrate` below runs against any state
+      // persisted by the previous release. The previous version stored
+      // `/api/llm/v1` (the local proxy URL) as `baseUrl` in proxy mode
+      // because the old "Built-in Hono proxy" preset had that value;
+      // that's no longer a valid upstream and needs to be replaced.
+      version: 3,
       partialize: ({ settings }) => ({
         settings: {
           ...settings,
@@ -93,6 +110,29 @@ export const useSettingsStore = create<SettingsStore>()(
           tts: { ...settings.tts, apiKey: "" },
         },
       }),
+      migrate: (persisted, version) => {
+        // Local-proxy URLs in proxy mode were valid in the previous
+        // release's UI but no longer resolve to a real upstream. Replace
+        // with the same default the rest of the app uses (OpenAI) so the
+        // user lands on a working provider without having to manually
+        // re-select one.
+        const state = persisted as Partial<SettingsStore> | undefined;
+        const llm = state?.settings?.llm;
+        if (version < 3 && llm && llm.transport === "proxy" && isLocalProxyUrl(llm.baseUrl ?? "")) {
+          return {
+            ...state,
+            settings: {
+              ...state?.settings,
+              llm: {
+                ...llm,
+                baseUrl: "https://api.openai.com/v1",
+                modelId: llm.modelId?.trim() ? llm.modelId : "gpt-4.1-mini",
+              },
+            },
+          } as SettingsStore;
+        }
+        return state as SettingsStore;
+      },
       merge: (persisted, current) => {
         const saved = (persisted as Partial<SettingsStore>)?.settings;
         return {

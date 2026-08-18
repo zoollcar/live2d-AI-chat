@@ -1,14 +1,68 @@
 import type { LlmSettings } from "@live2d-chat/shared";
 import type { SceneController } from "@/model/live2d/scene-controller";
 
+/**
+ * A tool invocation captured during an assistant turn. The runtime emits a
+ * `tool-call` event when the tool's `execute()` starts, then a matching
+ * `tool-result` event with the output once it finishes. The chat history view
+ * renders these so the user can see what the agent did, not just the reply.
+ *
+ * Providers may request tool calls from one assistant message in parallel.
+ * The scene tool registry serializes those calls because actions, states, and
+ * expressions all mutate the same Live2D model and their order is observable.
+ */
+export interface ToolCallRecord {
+  name: string;
+  input: unknown;
+  output?: unknown;
+  error?: string;
+}
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
+  /**
+   * Accumulated reasoning text for this assistant turn, populated from the
+   * remote runtime's `reasoning-delta` stream events. Only present when the
+   * underlying model is reasoning-capable (e.g. Claude Sonnet 4.5, Qwen
+   * reasoning variants). The chat history view renders this collapsed under
+   * a "Thinking" label.
+   */
+  reasoning?: string;
+  /**
+   * Tool invocations the model made during this assistant turn, in the order
+   * they were executed. Each entry gains its `output` once the corresponding
+   * `tool-result` event is received.
+   */
+  toolCalls?: ToolCallRecord[];
 }
 
+/**
+ * Semantic kind for a status event. The UI uses this to colour and animate the
+ * header chip without having to pattern-match the message string:
+ *
+ * - `idle`     — neutral, no animation. Use when the agent is finished and
+ *                waiting for the next turn.
+ * - `busy`     — work in progress with no measurable progress. Use for
+ *                reasoning, drafting replies, running tools, transcribing
+ *                speech, etc.
+ * - `progress` — long-running work with a `progress` field in [0, 1]. The UI
+ *                renders an inline progress bar.
+ * - `error`    — something went wrong; the chip switches to a warning colour
+ *                so the failure stands out from ordinary busy messages.
+ */
+export type StatusKind = "idle" | "busy" | "progress" | "error";
+
 export type AgentEvent =
-  | { type: "status"; message: string; progress?: number }
+  | { type: "status"; kind: StatusKind; message: string; progress?: number }
   | { type: "text-delta"; delta: string }
+  /**
+   * Reasoning text streamed from a reasoning-capable model. Emitted as
+   * deltas (the same shape as `text-delta`) so the caller can append
+   * incrementally into a single per-turn string. Only the remote runtime
+   * produces these; local wllama models do not emit reasoning.
+   */
+  | { type: "reasoning-delta"; delta: string }
   | { type: "tool-call"; name: string; input: unknown }
   | { type: "tool-result"; name: string; output: unknown }
   | { type: "done" }

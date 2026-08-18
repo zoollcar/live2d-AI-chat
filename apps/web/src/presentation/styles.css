@@ -15,7 +15,60 @@ button { cursor: pointer; }
 .brand { display: flex; align-items: center; gap: 12px; }
 .brand-mark { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 13px; background: linear-gradient(135deg,#f17dad,#876ee8); font-weight: 800; }
 .brand strong, .brand small { display: block; }
-.brand small { color: #a9a2b8; margin-top: 2px; font-size: 12px; }
+
+/* Status chip rendered under the title. The kind class drives colour,
+   animation, and whether an inline progress bar is shown so the user can
+   see what the app is doing (idle, busy, progress, error). */
+.status-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 4px; padding: 3px 9px; border-radius: 999px;
+  max-width: 240px; overflow: hidden;
+  font-size: 11px; line-height: 1; color: #a9a2b8;
+  background: rgba(255,255,255,.06);
+  transition: color .15s ease, background .15s ease;
+}
+.status-chip .status-message {
+  display: inline-block; max-width: 200px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.status-chip.status-idle { color: #a9a2b8; background: rgba(255,255,255,.05); }
+.status-chip.status-busy {
+  color: #f3a1c7; background: rgba(243,161,199,.12);
+}
+.status-chip.status-busy::before {
+  content: ""; width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%;
+  background: #f3a1c7;
+  box-shadow: 0 0 0 0 rgba(243,161,199,.55);
+  animation: status-pulse 1.4s ease-in-out infinite;
+}
+.status-chip.status-progress {
+  color: #c9bef0; background: rgba(120,98,217,.18);
+}
+.status-chip.status-progress::before {
+  content: ""; width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%;
+  background: #8269e0;
+}
+.status-chip.status-error {
+  color: #ff9fba; background: rgba(255,90,135,.18);
+}
+.status-chip.status-error::before {
+  content: ""; width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%;
+  background: #ff5a87;
+}
+.status-chip .status-progress {
+  display: inline-block; width: 56px; height: 3px;
+  flex: 0 0 56px; overflow: hidden; border-radius: 999px;
+  background: rgba(255,255,255,.14);
+}
+.status-chip .status-progress > span {
+  display: block; height: 100%; border-radius: inherit;
+  background: linear-gradient(90deg,#e36fa8,#8269e0);
+  transition: width .2s ease;
+}
+@keyframes status-pulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(243,161,199,.55); }
+  50%     { box-shadow: 0 0 0 6px rgba(243,161,199,.0); }
+}
 .icon-button { width: 40px; height: 40px; border: 0; border-radius: 13px; color: #fff; background: rgba(255,255,255,.09); font-size: 18px; }
 .conversation { position: absolute; top: 104px; left: 24px; width: min(350px, calc(100vw - 48px)); max-height: calc(100vh - 230px); border-radius: 24px; overflow: hidden; }
 .empty-copy { padding: 24px; }
@@ -58,19 +111,51 @@ button { cursor: pointer; }
 .history-message span { color: #e995bd; font-size: 11px; font-weight: 700; }
 .history-message p { margin: 5px 0 0; line-height: 1.5; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .history-empty { padding: 44px 24px; color: #aaa4b8; text-align: center; }
+/* Collapsible reasoning + tool call sections nested inside each assistant
+   bubble. The summary acts as an "eyebrow" label so they read as part of
+   the bubble rather than a separate component; the body uses the same
+   glass-panel palette as the rest of the settings dialog. */
+.history-thinking,
+.history-tool-calls { margin-top: 10px; border-top: 1px dashed rgba(255,255,255,.12); padding-top: 9px; }
+.history-thinking summary,
+.history-tool-calls summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: #e995bd; font-size: 11px; font-weight: 700; letter-spacing: .15em; list-style: none; }
+.history-thinking summary::-webkit-details-marker,
+.history-tool-calls summary::-webkit-details-marker { display: none; }
+.history-thinking summary::before,
+.history-tool-calls summary::before { content: "▸"; display: inline-block; transition: transform .15s ease; font-size: 10px; color: #b39bd6; }
+.history-thinking[open] > summary::before,
+.history-tool-calls[open] > summary::before { transform: rotate(90deg); }
+.history-thinking pre { margin: 8px 0 0; padding: 10px 12px; max-height: 220px; overflow: auto; border-radius: 10px; color: #d5cee8; background: rgba(0,0,0,.32); font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.history-tool-calls-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.history-tool-call { border-left: 1px dashed rgba(255,255,255,.18); padding: 4px 0 4px 10px; }
+.history-tool-call > summary { color: #c9bef0; font-size: 12px; letter-spacing: .08em; }
+.history-tool-call-body { display: grid; gap: 8px; margin-top: 8px; }
+.history-tool-call-block { display: grid; gap: 4px; }
+.history-tool-call-label { color: #9c96a8; font-size: 10px; letter-spacing: .15em; text-transform: uppercase; }
+.history-tool-call pre { margin: 0; padding: 9px 11px; max-height: 180px; overflow: auto; border-radius: 9px; color: #d5cee8; background: rgba(0,0,0,.32); font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .field { display: grid; gap: 6px; color: #aaa3b5; font-size: 12px; }
 .field input, .field select, .field textarea { width: 100%; border: 1px solid rgba(255,255,255,.12); border-radius: 11px; outline: 0; padding: 10px 12px; color: #f6f2fb; background: rgba(255,255,255,.055); }
 .field input:focus, .field select:focus { border-color: #da79aa; }
+.field input[readonly] { cursor: not-allowed; color: #c4becd; background: rgba(255,255,255,.025); border-style: dashed; }
 .field select { color-scheme: dark; }
 .field select option { color: #f6f2fb; background: #211d2b; }
 .field select option:checked { color: #fff; background: #765bd0; }
-.select-with-status { display: grid; grid-template-columns: minmax(0,1fr) 36px; gap: 8px; align-items: center; }
-.model-status { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; font-size: 15px; font-weight: 700; }
+.select-with-status { display: grid; grid-template-columns: minmax(0,1fr) 40px; gap: 8px; align-items: center; }
+.select-with-status > .search-button { width: 100%; height: 40px; }
+.model-status { display: grid; place-items: center; width: 100%; height: 40px; border: 1px solid rgba(255,255,255,.12); border-radius: 11px; font-size: 15px; font-weight: 700; }
 .model-status.downloaded { color: #79e1b4; background: rgba(58,178,127,.12); }
 .model-status.not-downloaded { color: #aaa3b5; background: rgba(255,255,255,.045); }
-.custom-model-row { display: grid; grid-template-columns: minmax(0,1fr) 42px; gap: 8px; }
+.custom-model-input { margin-top: 8px; }
 .search-button { display: grid; place-items: center; border: 1px solid rgba(218,121,170,.38); border-radius: 11px; color: #f3a1c7; background: rgba(218,121,170,.1); text-decoration: none; font-size: 22px; }
 .search-button:hover { color: #fff; border-color: #da79aa; background: rgba(218,121,170,.2); }
+.search-button:disabled, .search-button.loading { cursor: wait; color: #c9bef0; border-color: rgba(120,98,217,.5); background: rgba(120,98,217,.12); }
+.search-button.error { color: #ff9fba; border-color: rgba(255,90,135,.55); background: rgba(255,90,135,.12); }
+.search-button.error:hover { color: #fff; background: rgba(255,90,135,.22); border-color: #ff5a87; }
+.search-button.loading { animation: search-spin 0.9s linear infinite; }
+@keyframes search-spin { to { transform: rotate(360deg); } }
+.model-fetch-error { display: block; margin-top: 6px; color: #ff9fba; font-size: 12px; line-height: 1.45; }
+.settings-section .search-button { padding: 0; border: 1px solid rgba(218,121,170,.38); background: rgba(218,121,170,.1); color: #f3a1c7; }
+.settings-section .search-button:hover { color: #fff; border-color: #da79aa; background: rgba(218,121,170,.2); }
 .toggle-row { display: flex; align-items: center; gap: 9px; color: #c4becd; font-size: 13px; }
 .toggle-row input { accent-color: #db70a5; }
 .settings-actions { display: flex; align-items: center; gap: 12px; }

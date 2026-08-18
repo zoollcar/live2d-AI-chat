@@ -30,16 +30,44 @@ export const live2dCatalog = {
     ponytail: { parameter: "Param51", value: 1 },
     "hair-down": { parameter: "Param51", value: 2 },
   },
+  states: {
+    idle: {
+      motionGroup: "Idle",
+      motionIndex: 0,
+      expression: undefined,
+      parameters: [] as const,
+      blinkInterval: [2000, 6000] as const,
+    },
+    thinking: {
+      motionGroup: undefined,
+      motionIndex: 0,
+      expression: "疑惑",
+      parameters: [{ id: "ParamEyeBallX", value: -0.4 }] as const,
+      blinkInterval: [2500, 7000] as const,
+    },
+    sleeping: {
+      motionGroup: undefined,
+      motionIndex: 0,
+      expression: undefined,
+      parameters: [
+        { id: "ParamEyeLOpen", value: 0 },
+        { id: "ParamEyeROpen", value: 0 },
+      ] as const,
+      blinkInterval: [0, 0] as const,
+    },
+  },
 } as const;
 
 export type MoodId = "neutral" | keyof typeof live2dCatalog.moods;
 export type DecorationId = keyof typeof live2dCatalog.decorations;
 export type ActionId = keyof typeof live2dCatalog.actions;
+export type StateId = keyof typeof live2dCatalog.states;
 
 export interface SceneSnapshot {
   modelId: typeof live2dCatalog.id;
   mood: MoodId;
   decoration: DecorationId;
+  state: StateId;
   action?: ActionId;
   layout: StageLayoutId;
   viewport: { width: number; height: number };

@@ -13,4 +13,4 @@ export function createAgentRuntime(settings: LlmSettings): AgentRuntime {
   return new RemoteAgentRuntime();
 }
 
-export type { AgentEvent, AgentRuntime, ChatMessage } from "./types";
+export type { AgentEvent, AgentRuntime, ChatMessage, StatusKind, ToolCallRecord } from "./types";

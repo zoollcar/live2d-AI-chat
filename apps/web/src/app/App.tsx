@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createAgentRuntime, type AgentEvent, type ChatMessage } from "@/agent";
+import type { StatusKind } from "@/agent/types";
 import { SYSTEM_MESSAGE } from "@/agent/system-prompt";
 import { useSettingsStore } from "@/infrastructure/config/store";
 import { createLogger } from "@/infrastructure/log";
@@ -15,13 +16,21 @@ const log = createLogger("app");
 const SettingsPanel = lazy(() => import("@/presentation/settings/SettingsPanel")
   .then((module) => ({ default: module.SettingsPanel })));
 
+interface Status {
+  kind: StatusKind;
+  message: string;
+  progress?: number;
+}
+
+const STATUS_READY: Status = { kind: "idle", message: "Ready" };
+
 export default function App() {
   const { settings, hydrated, hydrateSecrets } = useSettingsStore();
   const [scene, setScene] = useState<SceneController>();
   const [messages, setMessages] = useState<ChatMessage[]>([SYSTEM_MESSAGE]);
   const [input, setInput] = useState("");
   const [subtitle, setSubtitle] = useState("Loading the Live2D model…");
-  const [status, setStatus] = useState("Initializing stage");
+  const [status, setStatus] = useState<Status>({ kind: "busy", message: "Initializing stage" });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [listening, setListening] = useState(false);
   const [running, setRunning] = useState(false);
@@ -38,6 +47,12 @@ export default function App() {
   // supposed to be on right now?" without re-creating callbacks on every state
   // change.
   const listeningRef = useRef(false);
+  // Set when the user submits a message by typing (form submit / Enter) so the
+  // LLM `done` handler and Chrome's no-speech `onAutoEnd` know to skip the
+  // mic auto-restart. Without this, after the AI replies to a typed message
+  // the mic would pop back on whenever `settings.stt.continuous` is on —
+  // which is wrong because the user explicitly chose to type rather than speak.
+  const userTypedRef = useRef(false);
 
   useEffect(() => {
     if (!hydrated) hydrateSecrets();
@@ -107,7 +122,7 @@ export default function App() {
     setMessages([...history, { role: "assistant", content: "" }]);
     setInput("");
     setSubtitle(text);
-    setStatus("AI is thinking");
+    setStatus({ kind: "busy", message: "AI is thinking" });
     setRunning(true);
     const runtime = createAgentRuntime(settings.llm);
 
@@ -120,27 +135,89 @@ export default function App() {
           return next;
         });
         for (const sentence of segmenterRef.current.push(event.delta)) speechQueueRef.current?.enqueue(sentence);
+      } else if (event.type === "reasoning-delta") {
+        // Append reasoning onto the trailing assistant message so the chat
+        // history's "Thinking" section grows in sync with the stream. We
+        // don't surface reasoning in the subtitle or send it to TTS — only
+        // the visible reply text should be spoken aloud.
+        setMessages((current) => {
+          const next = [...current];
+          const last = next.at(-1);
+          if (last?.role === "assistant") {
+            next[next.length - 1] = { ...last, reasoning: (last.reasoning ?? "") + event.delta };
+          }
+          return next;
+        });
       } else if (event.type === "status") {
-        setStatus(event.message);
+        // Forward the structured status as-is so the chip can render the
+        // correct colour/animation/progress bar. Drop `progress` when the
+        // kind isn't `progress` to avoid a stale bar sticking around.
+        const { kind, message, progress } = event;
+        setStatus(kind === "progress" && typeof progress === "number"
+          ? { kind, message, progress }
+          : { kind, message });
       } else if (event.type === "tool-call") {
-        setStatus(`Running tool: ${event.name}`);
+        // The registry emits this when a tool's execute() actually runs
+        // (after the SDK parsed the input). Keep the chip consistent with
+        // what we already announced in tool-input-start, and record the
+        // call on the trailing assistant message so chat history can show
+        // it later.
+        setStatus({ kind: "busy", message: `Running tool: ${event.name}` });
+        setMessages((current) => {
+          const next = [...current];
+          const last = next.at(-1);
+          if (last?.role === "assistant") {
+            const toolCalls = [...(last.toolCalls ?? []), { name: event.name, input: event.input }];
+            next[next.length - 1] = { ...last, toolCalls };
+          }
+          return next;
+        });
+      } else if (event.type === "tool-result") {
+        // The tool finished — patch its output onto the matching record so
+        // chat history can show the input/output pair. The local runtime
+        // runs tools sequentially and emits `tool-result` in execution order;
+        // the remote runtime can fire them in parallel but each `tool-result`
+        // event still carries the matching `name`. The last record whose
+        // `name` matches and `output` is still unset is the one we just
+        // finished.
+        setMessages((current) => {
+          const next = [...current];
+          const last = next.at(-1);
+          if (last?.role === "assistant" && last.toolCalls) {
+            const toolCalls = last.toolCalls.map((record, index, records) => {
+              if (record.name !== event.name) return record;
+              if (record.output !== undefined) return record;
+              // Guard against out-of-order results: only attach if this is
+              // the earliest unmatched record with this name.
+              const earlierUnmatched = records
+                .slice(0, index)
+                .some((other) => other.name === event.name && other.output === undefined);
+              return earlierUnmatched ? record : { ...record, output: event.output };
+            });
+            next[next.length - 1] = { ...last, toolCalls };
+          }
+          return next;
+        });
       } else if (event.type === "error") {
-        setStatus(`Error: ${event.error.message}`);
+        setStatus({ kind: "error", message: `Error: ${event.error.message}` });
         setRunning(false);
       } else if (event.type === "done") {
         const remaining = segmenterRef.current.flush();
         if (remaining) speechQueueRef.current?.enqueue(remaining);
-        setStatus("Ready");
+        setStatus(STATUS_READY);
         setRunning(false);
         // Auto-restart the mic so the next utterance flows without a click.
         // We use restartListening() (not startListening()) because Chrome's
         // `continuous: true` mode keeps the same recognition object alive and
         // starts returning empty-final noise from the AI's TTS bleeding into
         // the mic. A hard teardown + fresh session gives us a clean slate.
-        if (continuousRef.current) {
+        // Skip this when the user just typed the message — they explicitly
+        // chose text input, so the mic should stay off until they click it.
+        if (continuousRef.current && !userTypedRef.current) {
           log.debug("agent done — auto-restarting listener (fresh session)");
           void restartListeningRef.current?.();
         }
+        userTypedRef.current = false;
       }
     };
 
@@ -191,11 +268,17 @@ export default function App() {
           log.debug("onStatus", { next });
           setListening(next === "listening");
           listeningRef.current = next === "listening";
-          setStatus(next === "processing" ? "Transcribing speech" : next === "listening" ? "Listening" : "Ready");
+          if (next === "processing") {
+            setStatus({ kind: "busy", message: "Transcribing speech" });
+          } else if (next === "listening") {
+            setStatus({ kind: "busy", message: "Listening" });
+          } else {
+            setStatus(STATUS_READY);
+          }
         },
         onError: (error) => {
           log.error("onError", { message: error.message });
-          setStatus(`Speech recognition error: ${error.message}`);
+          setStatus({ kind: "error", message: `Speech recognition error: ${error.message}` });
           setListening(false);
           listeningRef.current = false;
         },
@@ -205,8 +288,10 @@ export default function App() {
           listeningRef.current = false;
           // In continuous mode, reopen the mic after Chrome's no-speech
           // timeout. Guard against the case where the user toggled continuous
-          // off mid-session and the LLM `done` is still pending.
-          if (continuousRef.current) {
+          // off mid-session and the LLM `done` is still pending. Also skip
+          // when the user just typed their last message — they're using
+          // text input and don't want the mic popping back on.
+          if (continuousRef.current && !userTypedRef.current) {
             log.debug("onAutoEnd — continuous mode, restarting mic");
             void restartListeningRef.current?.();
           }
@@ -219,7 +304,7 @@ export default function App() {
         sttRef.current?.abort();
         sttRef.current = undefined;
       }
-      setStatus(`Speech recognition error: ${error instanceof Error ? error.message : "Unavailable"}`);
+      setStatus({ kind: "error", message: `Speech recognition error: ${error instanceof Error ? error.message : "Unavailable"}` });
       setListening(false);
       listeningRef.current = false;
     }
@@ -269,12 +354,25 @@ export default function App() {
     log.debug("stopListening: stopped");
   }, []);
 
+  // Shared entry point for messages the user typed instead of spoke. Marks
+  // the turn as typed so the auto-restart logic in the LLM `done` handler
+  // (and Chrome's no-speech `onAutoEnd`) leave the mic off until the user
+  // clicks it again. Called from both the form submit and the textarea
+  // Enter-key path.
+  const submitTypedMessage = useCallback((text: string) => {
+    userTypedRef.current = true;
+    void sendMessage(text);
+  }, [sendMessage]);
+
   const onMicButtonClick = useCallback(async () => {
     if (running) {
       // Barge-in: stop the AI's playback and reopen the mic without making
       // the user click again. Leave continuous mode alone so the next reply
-      // also auto-restarts.
+      // also auto-restarts. Clear the typed flag so this turn counts as a
+      // voice interaction — the AI reply that follows should re-open the
+      // mic just like a spoken utterance would.
       log.debug("mic click while running — interrupting AI and opening mic");
+      userTypedRef.current = false;
       interruptPlayback();
       if (!listeningRef.current) await startListening();
       return;
@@ -303,11 +401,11 @@ export default function App() {
   const onStageReady = useCallback((controller: SceneController) => {
     setScene(controller);
     setSubtitle("");
-    setStatus("Ready");
+    setStatus(STATUS_READY);
   }, []);
 
   const onStageError = useCallback((error: Error) => {
-    setStatus(`Model failed to load: ${error.message}`);
+    setStatus({ kind: "error", message: `Model failed to load: ${error.message}` });
   }, []);
 
   return (
@@ -317,7 +415,26 @@ export default function App() {
       <Live2DStage onReady={onStageReady} onError={onStageError} />
 
       <header className="top-bar glass-panel">
-        <div className="brand"><span className="brand-mark">L2</span><div><strong>Live2D AI</strong><small>{status}</small></div></div>
+        <div className="brand">
+          <span className="brand-mark">L2</span>
+          <div>
+            <strong>Live2D AI</strong>
+            <small className={`status-chip status-${status.kind}`} aria-live="polite">
+              <span className="status-message">{status.message}</span>
+              {status.kind === "progress" && typeof status.progress === "number" && (
+                <span
+                  className="status-progress"
+                  role="progressbar"
+                  aria-valuenow={Math.round(status.progress * 100)}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                >
+                  <span style={{ width: `${Math.round(status.progress * 100)}%` }} />
+                </span>
+              )}
+            </small>
+          </div>
+        </div>
         <button className="icon-button" onClick={() => setSettingsOpen(true)} aria-label="Open settings">⚙</button>
       </header>
 
@@ -329,12 +446,12 @@ export default function App() {
 
       {settings.subtitlesEnabled && subtitle && <div className="subtitle">{subtitle}</div>}
 
-      <form className="composer glass-panel" onSubmit={(event) => { event.preventDefault(); void sendMessage(input); }}>
+      <form className="composer glass-panel" onSubmit={(event) => { event.preventDefault(); submitTypedMessage(input); }}>
         <button type="button" className={`mic-button ${listening ? "active" : ""} ${running && !listening ? "interrupting" : ""}`} onClick={() => void onMicButtonClick()} aria-label={listening ? "Stop listening" : running ? "Interrupt AI" : "Start listening"}>●</button>
         <textarea rows={1} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();
-            void sendMessage(input);
+            submitTypedMessage(input);
           }
         }} placeholder="Type a message…" />
         {running ? <button type="button" className="send-button stop" onClick={() => { continuousRef.current = false; stopEverything(); }}>■</button> : <button className="send-button" disabled={!scene || !input.trim()}>↑</button>}

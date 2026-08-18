@@ -1,6 +1,6 @@
 import type { LlmSettings, SttSettings, TtsSettings } from "@live2d-chat/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChatMessage } from "@/agent";
+import type { ChatMessage, ToolCallRecord } from "@/agent";
 import {
   downloadLocalModel,
   getLocalModelPartialProgress,
@@ -11,6 +11,50 @@ import { normalizeBaseUrl } from "@/infrastructure/config/defaults";
 import { useSettingsStore } from "@/infrastructure/config/store";
 import { downloadVitsVoice, getVitsVoicePartialProgress, isVitsVoiceDownloaded } from "@/interaction/tts/model-download";
 
+// JSON.stringify replacer used to render tool call input/output blocks. Strips
+// circular / non-serialisable values so a poorly-shaped tool argument never
+// blows up the chat history dialog. The renderer falls back to `String(value)`
+// for anything JSON.stringify can't handle (functions, symbols, bigints, …).
+function safeStringify(value: unknown): string {
+  const seen = new WeakSet<object>();
+  try {
+    return JSON.stringify(
+      value,
+      (_key, raw) => {
+        if (typeof raw === "function" || typeof raw === "symbol" || typeof raw === "bigint") return String(raw);
+        if (raw && typeof raw === "object") {
+          if (seen.has(raw as object)) return "[Circular]";
+          seen.add(raw as object);
+        }
+        return raw;
+      },
+      2,
+    ) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function ToolCallEntry({ call }: { call: ToolCallRecord }) {
+  const inputText = safeStringify(call.input);
+  const outputText = call.output !== undefined ? safeStringify(call.output) : call.error;
+  return (
+    <details className="history-tool-call">
+      <summary>{call.name}</summary>
+      <div className="history-tool-call-body">
+        <div className="history-tool-call-block">
+          <span className="history-tool-call-label">Input</span>
+          <pre>{inputText}</pre>
+        </div>
+        <div className="history-tool-call-block">
+          <span className="history-tool-call-label">{call.error ? "Error" : "Output"}</span>
+          <pre>{outputText}</pre>
+        </div>
+      </div>
+    </details>
+  );
+}
+
 interface Props {
   open: boolean;
   messages: ChatMessage[];
@@ -18,6 +62,19 @@ interface Props {
   onTestStt(): void;
   onTestTts(): void;
 }
+
+/**
+ * State of the "fetch model list" action. Tracks the baseUrl the result
+ * applies to so changing Provider / Transport correctly invalidates an
+ * older success result — otherwise switching from OpenAI to OpenRouter
+ * would leave OpenAI's model list in the dropdown until the user clicked
+ * fetch again.
+ */
+type DiscoverState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "success"; baseUrl: string; models: string[] }
+  | { status: "error"; message: string };
 
 interface ModelOption {
   label: string;
@@ -29,22 +86,79 @@ const languages = [
   { label: "English", value: "en-US" },
   { label: "Chinese", value: "zh-CN" },
 ];
-const llmUrlPresets = [
-  { label: "Built-in Hono proxy", value: "/api/llm/v1" },
-  { label: "OpenAI", value: "https://api.openai.com/v1" },
-  { label: "Ollama", value: "http://127.0.0.1:11434/v1" },
-  { label: "LM Studio", value: "http://127.0.0.1:1234/v1" },
-] as const;
 const openAiLlmModels: ModelOption[] = [
   { label: "GPT-4.1 mini · Recommended", value: "gpt-4.1-mini" },
   { label: "GPT-4o mini · Fast and economical", value: "gpt-4o-mini" },
   { label: "GPT-4.1 · Higher quality", value: "gpt-4.1" },
 ];
-const ollamaModels: ModelOption[] = [
-  { label: "Qwen 3.5 0.8B · Lightweight", value: "qwen3.5:0.8b" },
-  { label: "Qwen 3 1.7B · Balanced", value: "qwen3:1.7b" },
-  { label: "Llama 3.2 1B · Lightweight", value: "llama3.2:1b" },
+const openRouterLlmModels: ModelOption[] = [
+  { label: "Claude Sonnet 4.5 · Recommended", value: "anthropic/claude-sonnet-4.5" },
+  { label: "GPT-4.1 mini", value: "openai/gpt-4.1-mini" },
+  { label: "Gemini 2.5 Flash", value: "google/gemini-2.5-flash" },
+  { label: "Llama 3.3 70B Instruct", value: "meta-llama/llama-3.3-70b-instruct" },
 ];
+const minimaxCnLlmModels: ModelOption[] = [
+  { label: "MiniMax-M3 · Latest", value: "MiniMax-M3" },
+  { label: "MiniMax-M2 · Balanced", value: "MiniMax-M2" },
+];
+interface LlmProvider {
+  id: string;
+  label: string;
+  baseUrl: string;
+  models: ModelOption[];
+}
+// Built-in default whitelist. Mirrors the env var on the Hono proxy and is
+// used as a fallback when the proxy is unreachable so the settings UI still
+// renders something useful (e.g. during local development without the API).
+const defaultProxyProviders: LlmProvider[] = [
+  { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", models: openAiLlmModels },
+  { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", models: openRouterLlmModels },
+  { id: "minimax-cn", label: "MiniMax (China)", baseUrl: "https://api.minimaxi.com/v1", models: minimaxCnLlmModels },
+];
+// Local/self-hosted OpenAI-compatible platforms used when Connection is set
+// to "Direct OpenAI-compatible API". Each entry bundles a default base URL
+// and a small set of model presets that the dropdown can show before the
+// user fetches the live list from their own server.
+const defaultDirectProviders: LlmProvider[] = [
+  {
+    id: "ollama",
+    label: "Ollama",
+    baseUrl: "http://127.0.0.1:11434/v1",
+    models: [
+      { label: "Qwen 3.5 0.8B · Lightweight", value: "qwen3.5:0.8b" },
+      { label: "Qwen 3 1.7B · Balanced", value: "qwen3:1.7b" },
+      { label: "Llama 3.2 1B · Lightweight", value: "llama3.2:1b" },
+    ],
+  },
+  {
+    id: "lmstudio",
+    label: "LM Studio",
+    baseUrl: "http://127.0.0.1:1234/v1",
+    models: [],
+  },
+  {
+    id: "localai",
+    label: "LocalAI",
+    baseUrl: "http://127.0.0.1:8080/v1",
+    models: [],
+  },
+  {
+    id: "llamacpp",
+    label: "llama.cpp server",
+    baseUrl: "http://127.0.0.1:8000/v1",
+    models: [],
+  },
+  {
+    id: "vllm",
+    label: "vLLM",
+    baseUrl: "http://127.0.0.1:8000/v1",
+    models: [],
+  },
+];
+function findLlmProvider(providers: LlmProvider[], baseUrl: string): LlmProvider | undefined {
+  const normalized = baseUrl.trim().replace(/\/+$/, "");
+  return providers.find((provider) => provider.baseUrl === normalized);
+}
 const sttModels: ModelOption[] = [
   { label: "GPT-4o mini Transcribe · Recommended", value: "gpt-4o-mini-transcribe" },
   { label: "GPT-4o Transcribe · Higher quality", value: "gpt-4o-transcribe" },
@@ -69,7 +183,7 @@ const localVoices: Record<string, ModelOption[]> = {
 export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }: Props) {
   const { settings, updateLlm, updateStt, updateTts, setSubtitlesEnabled, reset } = useSettingsStore();
   const [connectionStatus, setConnectionStatus] = useState("");
-  const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
+  const [discoverState, setDiscoverState] = useState<DiscoverState>({ status: "idle" });
   const [localDownloaded, setLocalDownloaded] = useState<Record<string, boolean>>({});
   const [voiceDownloaded, setVoiceDownloaded] = useState<Record<string, boolean>>({});
   const [llmProgress, setLlmProgress] = useState<number>();
@@ -80,6 +194,7 @@ export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }:
   const [voiceDownloadStatus, setVoiceDownloadStatus] = useState("");
   const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [proxyProviders, setProxyProviders] = useState<LlmProvider[]>(defaultProxyProviders);
   const llmAbortRef = useRef<AbortController | undefined>(undefined);
   const voiceAbortRef = useRef<AbortController | undefined>(undefined);
 
@@ -90,17 +205,20 @@ export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }:
         value: model.id,
       }));
     }
-    const presets = settings.llm.transport === "proxy"
-      ? [...ollamaModels, ...openAiLlmModels]
-      : settings.llm.baseUrl.includes("11434")
-        ? ollamaModels
-        : openAiLlmModels;
-    const known = new Set(presets.map(({ value }) => value));
-    return [
-      ...presets,
-      ...discoveredModels.filter((model) => !known.has(model)).map((model) => ({ label: model, value: model })),
-    ];
-  }, [discoveredModels, settings.llm.baseUrl, settings.llm.transport]);
+    const providers = settings.llm.transport === "proxy" ? proxyProviders : defaultDirectProviders;
+    const provider = findLlmProvider(providers, settings.llm.baseUrl);
+    // Only use provider preset models when the user hasn't already pulled a
+    // fresh list from the live API for this exact baseUrl. Once they hit
+    // the magnifying glass and the fetch succeeds, the dropdown reflects
+    // what the server actually offers — the built-in presets are stale
+    // guesses by definition.
+    const haveFreshFetch = discoverState.status === "success" && discoverState.baseUrl === settings.llm.baseUrl;
+    const presets = haveFreshFetch ? [] : (provider?.models ?? []);
+    if (haveFreshFetch) {
+      return discoverState.models.map((model) => ({ label: model, value: model }));
+    }
+    return presets.map((preset) => ({ label: preset.label, value: preset.value }));
+  }, [discoverState, proxyProviders, settings.llm.baseUrl, settings.llm.transport]);
 
   const currentVoices = localVoices[settings.tts.language] || localVoices["en-US"];
   const filteredBrowserVoices = useMemo(() => {
@@ -158,6 +276,54 @@ export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }:
   }, []);
 
   useEffect(() => {
+    if (!open) return;
+    let active = true;
+    void fetch("/api/llm/upstreams")
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return (await response.json()) as { upstreams?: Array<{ id: string; baseUrl: string }> };
+      })
+      .then((payload) => {
+        if (!active || !payload.upstreams) return;
+        // Merge server-side whitelist with the client-side label/model presets.
+        // Unknown upstream ids fall back to a generic entry so the UI still
+        // renders them.
+        const merged = payload.upstreams.map<LlmProvider>((item) => {
+          const preset = defaultProxyProviders.find((provider) => provider.id === item.id);
+          return {
+            id: item.id,
+            label: preset?.label ?? item.id,
+            baseUrl: item.baseUrl,
+            models: preset?.models ?? [],
+          };
+        });
+        if (merged.length > 0) setProxyProviders(merged);
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [open]);
+
+  // If the persisted `baseUrl` doesn't match any proxy provider, silently
+  // re-target the first provider so the UI display matches the runtime's
+  // actual upstream. The persist `migrate` function already does this for
+  // legacy version-2 state; this catches anything that slipped through
+  // (e.g. a user manually edited localStorage, or a server-side upstream
+  // list removed the entry they were on). Only fires in proxy mode where
+  // a custom URL isn't permitted — direct mode keeps the user's custom
+  // value intact.
+  useEffect(() => {
+    if (!open || settings.llm.transport !== "proxy") return;
+    const providers = proxyProviders;
+    if (providers.length === 0) return;
+    if (findLlmProvider(providers, settings.llm.baseUrl)) return;
+    const fallback = providers[0];
+    updateLlm({
+      baseUrl: fallback.baseUrl,
+      modelId: fallback.models[0]?.value ?? settings.llm.modelId,
+    });
+  }, [open, proxyProviders, settings.llm.baseUrl, settings.llm.modelId, settings.llm.transport, updateLlm]);
+
+  useEffect(() => {
     if (!open || settings.tts.provider !== "browser-speech" || !("speechSynthesis" in window)) return;
     const updateVoices = () => setBrowserVoices([...window.speechSynthesis.getVoices()]);
     updateVoices();
@@ -186,18 +352,69 @@ export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }:
       }
       return;
     }
-    setConnectionStatus("Connecting…");
+    if (!settings.llm.modelId.trim()) {
+      setConnectionStatus("Enter a model ID before testing the connection.");
+      return;
+    }
+    setConnectionStatus("Sending a test request…");
     try {
-      const response = await fetch(`${normalizeBaseUrl(settings.llm.baseUrl)}/models`, {
-        headers: settings.llm.apiKey ? { authorization: `Bearer ${settings.llm.apiKey}` } : undefined,
+      const viaProxy = settings.llm.transport === "proxy";
+      const baseUrl = viaProxy ? "/api/llm/v1" : normalizeBaseUrl(settings.llm.baseUrl);
+      const headers: Record<string, string> = { "content-type": "application/json" };
+      if (settings.llm.apiKey) headers.authorization = `Bearer ${settings.llm.apiKey}`;
+      if (viaProxy) headers["X-LLM-Base-URL"] = normalizeBaseUrl(settings.llm.baseUrl);
+      const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: settings.llm.modelId,
+          messages: [{ role: "user", content: "ping" }],
+          max_tokens: 1,
+          stream: false,
+        }),
       });
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        throw new Error(`HTTP ${response.status}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
+      }
+      setConnectionStatus("Test passed: the language model responded to the request.");
+    } catch (error) {
+      setConnectionStatus(`Connection failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  };
+
+  const fetchRemoteModels = async () => {
+    if (settings.llm.transport === "local") {
+      // Local models are not fetched — they live in `localModelPresets` and
+      // are managed through the download list. Surface this in the shared
+      // status line and bail out without touching `discoverState`.
+      setConnectionStatus("Local models are managed from the download list, not fetched from an API.");
+      return;
+    }
+    const viaProxy = settings.llm.transport === "proxy";
+    // Capture the URL we're fetching from so a Provider/Transport change
+    // mid-flight can't apply the stale result to the new baseUrl. The
+    // guard below ignores responses whose `baseUrl` no longer matches.
+    const targetBaseUrl = settings.llm.baseUrl;
+    setDiscoverState({ status: "loading" });
+    setConnectionStatus("Fetching the model list…");
+    try {
+      const baseUrl = viaProxy ? "/api/llm/v1" : normalizeBaseUrl(targetBaseUrl);
+      const headers: Record<string, string> = {};
+      if (settings.llm.apiKey) headers.authorization = `Bearer ${settings.llm.apiKey}`;
+      if (viaProxy) headers["X-LLM-Base-URL"] = normalizeBaseUrl(targetBaseUrl);
+      const response = await fetch(`${baseUrl}/models`, { headers });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const payload = (await response.json()) as { data?: Array<{ id?: string }> };
       const ids = payload.data?.flatMap((model) => (model.id ? [model.id] : [])) || [];
-      setDiscoveredModels(ids);
-      setConnectionStatus(`Connected. Found ${ids.length} available model${ids.length === 1 ? "" : "s"}.`);
+      if (settings.llm.baseUrl !== targetBaseUrl) return;
+      setDiscoverState({ status: "success", baseUrl: targetBaseUrl, models: ids });
+      setConnectionStatus(`Discovered ${ids.length} model${ids.length === 1 ? "" : "s"} from the API.`);
     } catch (error) {
-      setConnectionStatus(`Connection failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+      if (settings.llm.baseUrl !== targetBaseUrl) return;
+      const message = error instanceof Error ? error.message : "Unknown error";
+      setDiscoverState({ status: "error", message });
+      setConnectionStatus(`Failed to fetch models: ${message}`);
     }
   };
 
@@ -269,15 +486,39 @@ export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }:
           <Field label="Connection">
             <select value={settings.llm.transport} onChange={(event) => {
               const transport = event.target.value as LlmSettings["transport"];
+              // Pick a sensible default model + baseUrl whenever the user
+              // crosses transport boundaries, so the Model dropdown always
+              // has a matching preset to show.
+              let nextBaseUrl = settings.llm.baseUrl;
+              let nextModelId = settings.llm.modelId;
+              if (transport === "local") {
+                nextModelId = localModelPresets[0].id;
+              } else if (settings.llm.transport === "local") {
+                if (transport === "proxy") {
+                  nextBaseUrl = proxyProviders[0]?.baseUrl ?? defaultDirectProviders[0].baseUrl;
+                  nextModelId = proxyProviders[0]?.models[0]?.value
+                    ?? defaultDirectProviders[0].models[0]?.value
+                    ?? "";
+                } else {
+                  nextBaseUrl = defaultDirectProviders[0].baseUrl;
+                  nextModelId = defaultDirectProviders[0].models[0]?.value ?? "";
+                }
+              } else if (transport === "proxy" && !findLlmProvider(proxyProviders, settings.llm.baseUrl)) {
+                nextBaseUrl = proxyProviders[0]?.baseUrl ?? settings.llm.baseUrl;
+                nextModelId = proxyProviders[0]?.models[0]?.value ?? "";
+              } else if (transport === "direct" && !findLlmProvider(defaultDirectProviders, settings.llm.baseUrl)) {
+                nextBaseUrl = defaultDirectProviders[0].baseUrl;
+                nextModelId = defaultDirectProviders[0].models[0]?.value ?? "";
+              }
               updateLlm({
                 transport,
-                modelId: transport === "local"
-                  ? localModelPresets[0].id
-                  : settings.llm.transport === "local"
-                    ? (transport === "proxy" ? ollamaModels[0].value : openAiLlmModels[0].value)
-                    : settings.llm.modelId,
-                baseUrl: transport === "proxy" ? "/api/llm/v1" : transport === "direct" && settings.llm.baseUrl.startsWith("/") ? "https://api.openai.com/v1" : settings.llm.baseUrl,
+                baseUrl: nextBaseUrl,
+                modelId: nextModelId,
               });
+              // The previously-fetched model list was bound to the old
+              // baseUrl — dropping it so the dropdown falls back to the
+              // new provider's built-in presets instead of a stale result.
+              setDiscoverState({ status: "idle" });
               setConnectionStatus("");
             }}>
               <option value="proxy">Built-in Hono proxy</option>
@@ -285,20 +526,54 @@ export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }:
               <option value="local">Local wllama in the browser</option>
             </select>
           </Field>
-          {settings.llm.transport !== "local" && (
-            <>
-              <Field label="URL preset">
-                <select value={llmUrlPresets.some(({ value }) => value === settings.llm.baseUrl) ? settings.llm.baseUrl : customValue} onChange={(event) => {
-                  if (event.target.value !== customValue) updateLlm({ baseUrl: event.target.value });
-                }}>
-                  {llmUrlPresets.map((preset) => <option key={preset.value} value={preset.value}>{preset.label}</option>)}
-                  <option value={customValue}>Custom OpenAI-compatible API</option>
-                </select>
-              </Field>
-              <Field label="API URL"><input value={settings.llm.baseUrl} onChange={(event) => updateLlm({ baseUrl: event.target.value })} /></Field>
-              <SecretField value={settings.llm.apiKey} remember={settings.llm.rememberApiKey} onChange={(apiKey) => updateLlm({ apiKey })} onRemember={(rememberApiKey) => updateLlm({ rememberApiKey })} />
-            </>
-          )}
+          {settings.llm.transport !== "local" && (() => {
+            const viaProxy = settings.llm.transport === "proxy";
+            const providers = viaProxy ? proxyProviders : defaultDirectProviders;
+            const allowCustom = !viaProxy;
+            const matchedProvider = findLlmProvider(providers, settings.llm.baseUrl);
+            // If the persisted `baseUrl` doesn't match any provider AND
+            // custom isn't allowed (proxy mode), fall back to displaying
+            // the first provider. The actual state rewrite happens in a
+            // dedicated `useEffect` below so we don't trigger a render
+            // side-effect.
+            const displayedProvider = matchedProvider ?? (viaProxy ? providers[0] : undefined);
+            return (
+              <>
+                <Field label="Provider">
+                  <select
+                    value={displayedProvider?.id ?? customValue}
+                    onChange={(event) => {
+                      if (event.target.value === customValue) return;
+                      const provider = providers.find((item) => item.id === event.target.value);
+                      if (!provider) return;
+                      updateLlm({
+                        baseUrl: provider.baseUrl,
+                        modelId: provider.models[0]?.value ?? "",
+                      });
+                      // Provider switched — clear any stale fetch so the
+                      // dropdown lands on the new provider's presets.
+                      setDiscoverState({ status: "idle" });
+                    }}
+                  >
+                    {providers.map((provider) => (
+                      <option key={provider.id} value={provider.id}>{provider.label}</option>
+                    ))}
+                    {allowCustom && <option value={customValue}>Custom OpenAI-compatible API</option>}
+                  </select>
+                </Field>
+                <Field label="API URL">
+                  <input
+                    value={settings.llm.baseUrl}
+                    onChange={(event) => updateLlm({ baseUrl: event.target.value })}
+                    readOnly={viaProxy}
+                    aria-readonly={viaProxy || undefined}
+                    title={viaProxy ? "The URL is locked to the proxy's upstream whitelist." : undefined}
+                  />
+                </Field>
+                <SecretField value={settings.llm.apiKey} remember={settings.llm.rememberApiKey} onChange={(apiKey) => updateLlm({ apiKey })} onRemember={(rememberApiKey) => updateLlm({ rememberApiKey })} />
+              </>
+            );
+          })()}
           <ModelChoiceField
             label="Model"
             value={settings.llm.modelId}
@@ -306,6 +581,9 @@ export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }:
             downloaded={settings.llm.transport === "local" ? localDownloaded : undefined}
             searchUrl={(query) => settings.llm.transport === "local" ? huggingFaceSearch(query) : modelWebSearch(query)}
             onChange={(modelId) => updateLlm({ modelId })}
+            onFetchModels={settings.llm.transport !== "local" ? () => void fetchRemoteModels() : undefined}
+            fetching={discoverState.status === "loading"}
+            fetchError={discoverState.status === "error" ? discoverState.message : undefined}
           />
           {settings.llm.transport === "local" && <DownloadProgress progress={llmProgress ?? (llmResumeProgress || undefined)} status={llmDownloadStatus} />}
           <div className="settings-actions">
@@ -416,6 +694,22 @@ export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }:
                   <article className={`history-message ${message.role}`} key={`${index}-${message.role}`}>
                     <span>{message.role === "user" ? "User" : "Assistant"}</span>
                     <p>{message.content || "…"}</p>
+                    {message.role === "assistant" && message.reasoning && (
+                      <details className="history-thinking">
+                        <summary>Thinking</summary>
+                        <pre>{message.reasoning}</pre>
+                      </details>
+                    )}
+                    {message.role === "assistant" && message.toolCalls && message.toolCalls.length > 0 && (
+                      <details className="history-tool-calls">
+                        <summary>Tool calls ({message.toolCalls.length})</summary>
+                        <div className="history-tool-calls-list">
+                          {message.toolCalls.map((call, callIndex) => (
+                            <ToolCallEntry key={`${callIndex}-${call.name}`} call={call} />
+                          ))}
+                        </div>
+                      </details>
+                    )}
                   </article>
                 ))}
               </div>
@@ -427,15 +721,24 @@ export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }:
   );
 }
 
-function ModelChoiceField({ label, value, options, downloaded, searchUrl, onChange }: {
+function ModelChoiceField({ label, value, options, downloaded, searchUrl, onChange, onFetchModels, fetching, fetchError }: {
   label: string;
   value: string;
   options: ModelOption[];
   downloaded?: Record<string, boolean>;
   searchUrl(query: string): string;
   onChange(value: string): void;
+  onFetchModels?(): void;
+  // Live state for the magnifying-glass action. When `fetching` is true
+  // the button is disabled and shows a spinner glyph; when `fetchError`
+  // is set, the error is rendered inline below the dropdown so the user
+  // knows the preset list they're seeing is a fallback, not what the API
+  // actually returned.
+  fetching?: boolean;
+  fetchError?: string;
 }) {
   const isPreset = options.some((option) => option.value === value);
+  const fetchTitle = onFetchModels ? "Fetch available models from the API" : "Search for available models";
   return (
     <Field label={label}>
       <div className="select-with-status">
@@ -443,13 +746,28 @@ function ModelChoiceField({ label, value, options, downloaded, searchUrl, onChan
           {options.map((option) => <option key={option.value} value={option.value}>{option.label}{downloaded ? ` ${downloaded[option.value] ? "✓" : "↓"}` : ""}</option>)}
           <option value={customValue}>Custom model…</option>
         </select>
-        {downloaded && <ModelStatus downloaded={Boolean(downloaded[value])} />}
+        {downloaded ? (
+          <ModelStatus downloaded={Boolean(downloaded[value])} />
+        ) : onFetchModels ? (
+          <button
+            type="button"
+            className={`search-button${fetching ? " loading" : ""}${fetchError ? " error" : ""}`}
+            onClick={() => onFetchModels()}
+            disabled={fetching}
+            aria-label="Fetch available models"
+            title={fetchError ? `Last fetch failed: ${fetchError} — click to retry` : fetchTitle}
+          >{fetching ? "↻" : "⌕"}</button>
+        ) : (
+          <a className="search-button" href={searchUrl(value)} target="_blank" rel="noreferrer" aria-label="Search for available models" title={fetchTitle}>⌕</a>
+        )}
       </div>
+      {fetchError && (
+        <span className="model-fetch-error" role="alert">
+          Couldn't load the model list: {fetchError}. Showing built-in presets — click ⌕ to retry.
+        </span>
+      )}
       {!isPreset && (
-        <div className="custom-model-row">
-          <input value={value} onChange={(event) => onChange(event.target.value)} placeholder="Enter a model name" />
-          <a className="search-button" href={searchUrl(value)} target="_blank" rel="noreferrer" aria-label="Search for available models" title="Search for available models">⌕</a>
-        </div>
+        <input className="custom-model-input" value={value} onChange={(event) => onChange(event.target.value)} placeholder="Enter a model name" />
       )}
     </Field>
   );
