@@ -13,7 +13,7 @@ button { cursor: pointer; }
 .glass-panel { background: rgba(15, 13, 25, .62); border: 1px solid rgba(255,255,255,.12); box-shadow: 0 18px 50px rgba(0,0,0,.24); backdrop-filter: blur(24px); }
 .top-bar { position: absolute; top: 20px; left: 24px; right: 24px; height: 64px; padding: 10px 12px; border-radius: 20px; display: flex; align-items: center; justify-content: space-between; }
 .brand { display: flex; align-items: center; gap: 12px; }
-.brand-mark { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 13px; background: linear-gradient(135deg,#f17dad,#876ee8); font-weight: 800; }
+.brand-mark { display: block; width: 44px; height: 44px; object-fit: contain; filter: drop-shadow(0 5px 10px rgba(93,205,255,.22)); }
 .brand strong, .brand small { display: block; }
 
 /* Status chip rendered under the title. The kind class drives colour,

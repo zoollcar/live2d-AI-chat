@@ -416,7 +416,7 @@ export default function App() {
 
       <header className="top-bar glass-panel">
         <div className="brand">
-          <span className="brand-mark">L2</span>
+          <img className="brand-mark" src="/brand/ice-girl-logo.png" alt="" aria-hidden="true" />
           <div>
             <strong>Live2D AI</strong>
             <small className={`status-chip status-${status.kind}`} aria-live="polite">
