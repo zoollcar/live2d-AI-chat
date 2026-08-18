@@ -41,7 +41,7 @@ export interface SttSettings {
   continuous: boolean;
 }
 
-export type TtsProviderId = "vits-local" | "browser-speech" | "openai-compatible";
+export type TtsProviderId = "vits-local" | "browser-speech" | "openai-compatible" | "google-cloud";
 export interface TtsSettings {
   provider: TtsProviderId;
   baseUrl: string;

@@ -9,6 +9,7 @@ import {
 } from "@/agent/local-models";
 import { normalizeBaseUrl } from "@/infrastructure/config/defaults";
 import { useSettingsStore } from "@/infrastructure/config/store";
+import { fetchGoogleCloudVoices, type GoogleCloudVoice } from "@/interaction/tts/google-cloud-tts";
 import { downloadVitsVoice, getVitsVoicePartialProgress, isVitsVoiceDownloaded } from "@/interaction/tts/model-download";
 
 // JSON.stringify replacer used to render tool call input/output blocks. Strips
@@ -75,6 +76,12 @@ type DiscoverState =
   | { status: "loading" }
   | { status: "success"; baseUrl: string; models: string[] }
   | { status: "error"; message: string };
+
+type GoogleVoiceState =
+  | { status: "idle"; voices: GoogleCloudVoice[] }
+  | { status: "loading"; voices: GoogleCloudVoice[] }
+  | { status: "success"; voices: GoogleCloudVoice[] }
+  | { status: "error"; voices: GoogleCloudVoice[]; message: string };
 
 interface ModelOption {
   label: string;
@@ -184,6 +191,7 @@ export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }:
   const { settings, updateLlm, updateStt, updateTts, setSubtitlesEnabled, reset } = useSettingsStore();
   const [connectionStatus, setConnectionStatus] = useState("");
   const [discoverState, setDiscoverState] = useState<DiscoverState>({ status: "idle" });
+  const [googleVoiceState, setGoogleVoiceState] = useState<GoogleVoiceState>({ status: "idle", voices: [] });
   const [localDownloaded, setLocalDownloaded] = useState<Record<string, boolean>>({});
   const [voiceDownloaded, setVoiceDownloaded] = useState<Record<string, boolean>>({});
   const [llmProgress, setLlmProgress] = useState<number>();
@@ -337,6 +345,37 @@ export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }:
       voice.voiceURI === settings.tts.voice || voice.name === settings.tts.voice);
     if (!selectedExists) updateTts({ voice: filteredBrowserVoices[0].voiceURI });
   }, [filteredBrowserVoices, settings.tts.provider, settings.tts.voice, updateTts]);
+
+  useEffect(() => {
+    const apiKey = settings.tts.apiKey.trim();
+    if (!open || settings.tts.provider !== "google-cloud" || !apiKey) {
+      setGoogleVoiceState({ status: "idle", voices: [] });
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setGoogleVoiceState((current) => ({ status: "loading", voices: current.voices }));
+      void fetchGoogleCloudVoices(apiKey, settings.tts.language, controller.signal)
+        .then((voices) => {
+          setGoogleVoiceState({ status: "success", voices });
+          updateTts({ voice: voices[0]?.name || "" });
+        })
+        .catch((error: unknown) => {
+          if (controller.signal.aborted) return;
+          setGoogleVoiceState({
+            status: "error",
+            voices: [],
+            message: error instanceof Error ? error.message : "Unable to load Google Cloud voices.",
+          });
+        });
+    }, 400);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [open, settings.tts.apiKey, settings.tts.language, settings.tts.provider, updateTts]);
 
   if (!open) return null;
 
@@ -618,10 +657,17 @@ export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }:
         <section className="settings-section">
           <h3>Speech synthesis</h3>
           <Field label="Provider">
-            <select value={settings.tts.provider} onChange={(event) => updateTts({ provider: event.target.value as TtsSettings["provider"] })}>
+            <select value={settings.tts.provider} onChange={(event) => {
+              const provider = event.target.value as TtsSettings["provider"];
+              if (provider === "google-cloud") updateTts({ provider, voice: "", apiKey: "" });
+              else if (provider === "openai-compatible") updateTts({ provider, voice: "alloy", apiKey: "" });
+              else if (provider === "vits-local") updateTts({ provider, voice: localVoices[settings.tts.language]?.[0]?.value || "" });
+              else updateTts({ provider });
+            }}>
               <option value="vits-local">Local VITS</option>
               <option value="browser-speech">Browser Speech Synthesis</option>
               <option value="openai-compatible">OpenAI-compatible</option>
+              <option value="google-cloud">Google Cloud Text-to-Speech</option>
             </select>
           </Field>
           {settings.tts.provider === "openai-compatible" && (
@@ -631,9 +677,12 @@ export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }:
               <SecretField value={settings.tts.apiKey} remember={settings.tts.rememberApiKey} onChange={(apiKey) => updateTts({ apiKey })} onRemember={(rememberApiKey) => updateTts({ rememberApiKey })} />
             </>
           )}
+          {settings.tts.provider === "google-cloud" && (
+            <SecretField value={settings.tts.apiKey} remember={settings.tts.rememberApiKey} onChange={(apiKey) => updateTts({ apiKey })} onRemember={(rememberApiKey) => updateTts({ rememberApiKey })} />
+          )}
           <LanguageField value={settings.tts.language} onChange={(language) => {
             const voice = localVoices[language]?.[0]?.value || settings.tts.voice;
-            updateTts({ language, ...(settings.tts.provider === "vits-local" ? { voice } : {}) });
+            updateTts({ language, ...(settings.tts.provider === "vits-local" ? { voice } : {}), ...(settings.tts.provider === "google-cloud" ? { voice: "" } : {}) });
           }} />
           {settings.tts.provider === "vits-local" ? (
             <Field label="Voice model">
@@ -659,6 +708,27 @@ export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }:
                 ))}
               </select>
             </Field>
+          ) : settings.tts.provider === "google-cloud" ? (
+            <>
+              <Field label="Google voice">
+                <select
+                  value={googleVoiceState.voices.some((voice) => voice.name === settings.tts.voice) ? settings.tts.voice : ""}
+                  onChange={(event) => updateTts({ voice: event.target.value })}
+                  disabled={googleVoiceState.status === "loading" || googleVoiceState.voices.length === 0}
+                >
+                  {googleVoiceState.status === "idle" && <option value="">Enter an API key to load voices</option>}
+                  {googleVoiceState.status === "loading" && <option value="">Loading voices…</option>}
+                  {googleVoiceState.status === "error" && <option value="">Unable to load voices</option>}
+                  {googleVoiceState.status === "success" && googleVoiceState.voices.length === 0 && <option value="">No voices are available for this language</option>}
+                  {googleVoiceState.voices.map((voice) => (
+                    <option key={voice.name} value={voice.name}>
+                      {voice.name} · {formatGoogleVoiceGender(voice.ssmlGender)} · {Math.round(voice.naturalSampleRateHertz / 1000)} kHz
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              {googleVoiceState.status === "error" && <span className="status-copy" role="alert">{googleVoiceState.message}</span>}
+            </>
           ) : <Field label="Voice"><input value={settings.tts.voice} onChange={(event) => updateTts({ voice: event.target.value })} /></Field>}
           <div className="range-grid">
             <Field label={`Rate ${settings.tts.rate.toFixed(1)}`}><input type="range" min="0.5" max="2" step="0.1" value={settings.tts.rate} onChange={(event) => updateTts({ rate: Number(event.target.value) })} /></Field>
@@ -815,4 +885,11 @@ function huggingFaceSearch(query: string) {
 
 function modelWebSearch(query: string) {
   return `https://www.google.com/search?q=${encodeURIComponent(`OpenAI-compatible model ID ${query}`)}`;
+}
+
+function formatGoogleVoiceGender(gender: string) {
+  if (gender === "MALE") return "Male";
+  if (gender === "FEMALE") return "Female";
+  if (gender === "NEUTRAL") return "Neutral";
+  return "Unspecified";
 }

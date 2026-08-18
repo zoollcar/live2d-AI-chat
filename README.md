@@ -10,7 +10,7 @@ The bundled Ice Girl assets are the default character only. The assistant person
 - Multi-step AI SDK agent with browser-side tool execution
 - Direct OpenAI-compatible, same-origin Hono proxy, and local GGUF inference modes
 - Web Speech and OpenAI-compatible speech recognition
-- Local VITS, browser Speech Synthesis, and OpenAI-compatible speech synthesis
+- Local VITS, browser Speech Synthesis, OpenAI-compatible, and Google Cloud speech synthesis
 - Streaming responses, sentence-level playback, lip sync, and user interruption
 - Replaceable visual-context interface for future scene awareness
 
@@ -68,7 +68,7 @@ docker run --rm -p 8787:8787 --env-file apps/api/.env live2d-ai
 
 ## Model and speech settings
 
-The settings panel configures LLM, STT, and TTS providers independently. API keys are stored in `sessionStorage` by default. A key is written to `localStorage` only when **Remember this key on this device** is enabled.
+The settings panel configures LLM, STT, and TTS providers independently, including direct Google Cloud Text-to-Speech access with your own API key. API keys are stored in `sessionStorage` by default. A key is written to `localStorage` only when **Remember this key on this device** is enabled.
 
 The default local LLM is the `Q4_K_M` build of `unsloth/Qwen3.5-0.8B-GGUF`. Models are cached in browser OPFS storage. Multithreaded wllama requires COOP and COEP response headers; the included Vercel configuration already provides them, and other deployment platforms need equivalent headers.
 

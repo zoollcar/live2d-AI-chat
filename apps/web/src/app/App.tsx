@@ -462,7 +462,11 @@ export default function App() {
           <SettingsPanel open onClose={() => setSettingsOpen(false)}
             messages={visibleMessages}
             onTestStt={() => void startListening()}
-            onTestTts={() => speechQueueRef.current?.enqueue("Hello, this is a speech synthesis test.")} />
+            onTestTts={() => speechQueueRef.current?.enqueue(
+              settings.tts.language.toLowerCase().startsWith("zh")
+                ? "你好，这是一段语音合成测试。"
+                : "Hello, this is a speech synthesis test.",
+            )} />
         </Suspense>
       ) : null}
     </main>
