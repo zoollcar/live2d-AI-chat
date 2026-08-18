@@ -1,6 +1,6 @@
 {
   "Version": 3,
-  "Meta": { "Duration": 4, "Fps": 30, "Loop": false, "FadeInTime": 0.35, "FadeOutTime": 0.6, "AreBeziersRestricted": true, "CurveCount": 2, "TotalSegmentCount": 11, "TotalPointCount": 13, "UserDataCount": 0, "TotalUserDataSize": 0 },
+  "Meta": { "Duration": 4, "Fps": 30, "Loop": false, "FadeInTime": 0.35, "FadeOutTime": 0, "AreBeziersRestricted": true, "CurveCount": 2, "TotalSegmentCount": 11, "TotalPointCount": 13, "UserDataCount": 0, "TotalUserDataSize": 0 },
   "Curves": [
     { "Target": "Parameter", "Id": "Param59", "Segments": [0, 0, 0, 0.35, 1, 0, 3.45, 1, 0, 4, 0] },
     { "Target": "Parameter", "Id": "Param58", "Segments": [0, -1, 0, 0.35, -1, 0, 0.8, 1, 0, 1.25, -1, 0, 1.7, 1, 0, 2.15, -1, 0, 2.6, 1, 0, 3.05, -1, 0, 4, -1] }
