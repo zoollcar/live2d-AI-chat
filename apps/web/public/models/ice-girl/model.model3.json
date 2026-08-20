@@ -39,6 +39,42 @@
       "Idle": [
         { "File": "motions/Idle/Idle_Subtle.motion3.json" }
       ],
+      "StateNeutral": [
+        { "File": "motions/States/Neutral.motion3.json" }
+      ],
+      "StateHappy": [
+        { "File": "motions/States/Happy.motion3.json" }
+      ],
+      "StateAngry": [
+        { "File": "motions/States/Angry.motion3.json" }
+      ],
+      "StateConfused": [
+        { "File": "motions/States/Confused.motion3.json" }
+      ],
+      "StateSad": [
+        { "File": "motions/States/Sad.motion3.json" }
+      ],
+      "StateSurprised": [
+        { "File": "motions/States/Surprised.motion3.json" }
+      ],
+      "StateExcited": [
+        { "File": "motions/States/Excited.motion3.json" }
+      ],
+      "StateAffectionate": [
+        { "File": "motions/States/Affectionate.motion3.json" }
+      ],
+      "StateSkeptical": [
+        { "File": "motions/States/Skeptical.motion3.json" }
+      ],
+      "StatePlayful": [
+        { "File": "motions/States/Playful.motion3.json" }
+      ],
+      "StateThinking": [
+        { "File": "motions/States/Thinking.motion3.json" }
+      ],
+      "StateSleeping": [
+        { "File": "motions/States/Sleeping.motion3.json" }
+      ],
       "Speak": [
         { "File": "motions/Speak/Speak_Subtle.motion3.json" }
       ],

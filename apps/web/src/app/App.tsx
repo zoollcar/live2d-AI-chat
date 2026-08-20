@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createAgentRuntime, type AgentEvent, type ChatMessage } from "@/agent";
+import { prefixAgentStatus } from "@/agent/status-context";
 import type { StatusKind } from "@/agent/types";
 import { SYSTEM_MESSAGE } from "@/agent/system-prompt";
 import { useSettingsStore } from "@/infrastructure/config/store";
@@ -118,7 +119,15 @@ export default function App() {
     // Read the latest history from the ref so this callback works correctly
     // even when called from a stale closure (e.g. the onFinal handler that was
     // registered before subsequent messages were appended).
-    const history: ChatMessage[] = [...messagesRef.current, { role: "user", content: text }];
+    const userMessage: ChatMessage = { role: "user", content: text };
+    const history: ChatMessage[] = [...messagesRef.current, userMessage];
+    // Keep React history pristine for display and future turns. Only the
+    // current runtime request sees the changing environment block, placed at
+    // the end of the multi-turn prompt to preserve the longest stable prefix.
+    const runtimeHistory: ChatMessage[] = [
+      ...messagesRef.current,
+      { ...userMessage, content: prefixAgentStatus(text, scene.snapshot()) },
+    ];
     setMessages([...history, { role: "assistant", content: "" }]);
     setInput("");
     setSubtitle(text);
@@ -221,7 +230,7 @@ export default function App() {
       }
     };
 
-    await runtime.run({ messages: history, settings: settings.llm, scene, signal: controller.signal, emit });
+    await runtime.run({ messages: runtimeHistory, settings: settings.llm, scene, signal: controller.signal, emit });
   }, [interruptPlayback, scene, settings.llm]);
 
   // startListeningRef mirrors `startListening` so async callbacks above can

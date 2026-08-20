@@ -1,0 +1,9 @@
+{
+  "Version": 3,
+  "Meta": { "Duration": 15, "Fps": 30, "Loop": true, "FadeInTime": 1.5, "FadeOutTime": 1.5, "AreBeziersRestricted": true, "CurveCount": 3, "TotalSegmentCount": 12, "TotalPointCount": 15, "UserDataCount": 0, "TotalUserDataSize": 0 },
+  "Curves": [
+    { "Target": "Parameter", "Id": "ParamAngleX", "Segments": [0, 2, 0, 3.75, 1.2, 0, 7.5, 2, 0, 11.25, 2.8, 0, 15, 2] },
+    { "Target": "Parameter", "Id": "ParamAngleZ", "Segments": [0, -3, 0, 3.75, -2.5, 0, 7.5, -3, 0, 11.25, -3.5, 0, 15, -3] },
+    { "Target": "Parameter", "Id": "ParamBreath", "Segments": [0, 0.45, 0, 3.75, 0.75, 0, 7.5, 0.45, 0, 11.25, 0.2, 0, 15, 0.45] }
+  ]
+}

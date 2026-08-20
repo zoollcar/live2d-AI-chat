@@ -2,10 +2,10 @@ import type { StageLayoutId } from "@live2d-chat/shared";
 import { MotionPriority, type InternalModel, type Live2DModel } from "pixi-live2d-display-lipsyncpatch";
 import type { Application, ICanvas } from "pixi.js";
 import {
+  decorationIds,
   live2dCatalog,
   type ActionId,
   type DecorationId,
-  type MoodId,
   type SceneSnapshot,
   type StateId,
 } from "./catalog";
@@ -34,7 +34,11 @@ interface QueuedAction {
   reject: (error: unknown) => void;
 }
 
-const decorationParameters = ["Param53", "Param40", "Param41", "ShouBing", "JiaJu", "Param51"] as const;
+const stateParameterDefaults = [
+  { id: "Param31", value: 0 },
+  { id: "ParamEyeBallX", value: 0 },
+  { id: "ParamEyeBallY", value: 0 },
+] as const;
 
 const layoutTransitionDuration = 750;
 const layoutEasing = [0.4, 0, 0.2, 1] as const;
@@ -67,24 +71,31 @@ export class SceneController {
   private blinkPhase: BlinkPhase = "open";
   private blinkPhaseStartMs = performance.now();
   private nextBlinkAtMs = performance.now() + 4000;
-  private manualBlinkPending = false;
 
   private readonly applyPerFrame = () => {
     if (this.disposed) return;
     const coreModel = this.model.internalModel.coreModel as CubismCoreModel;
 
     // (a) decoration: clear all known decoration params, then apply current
-    for (const parameter of decorationParameters) coreModel.setParameterValueById(parameter, 0);
-    const decoration = live2dCatalog.decorations[this.snapshotValue.decoration];
-    if (decoration) coreModel.setParameterValueById(decoration.parameter, decoration.value);
+    for (const decoration of Object.values(live2dCatalog.decorations)) {
+      coreModel.setParameterValueById(decoration.parameter, decoration.offValue);
+    }
+    for (const id of this.snapshotValue.decorations) {
+      const decoration = live2dCatalog.decorations[id];
+      coreModel.setParameterValueById(decoration.parameter, decoration.value);
+    }
 
-    // (b) state parameter overrides (e.g. sleeping keeps eyes closed)
+    // (b) clear persistent parameters owned by state profiles, then apply the
+    // current profile. This prevents gaze/blush values leaking across states.
+    for (const parameter of stateParameterDefaults) {
+      coreModel.setParameterValueById(parameter.id, parameter.value);
+    }
     const state = live2dCatalog.states[this.snapshotValue.state];
     for (const parameter of state.parameters) {
       coreModel.setParameterValueById(parameter.id, parameter.value);
     }
 
-    // (c) ambient / manual blink
+    // (c) ambient blink
     this.applyBlink(coreModel);
   };
 
@@ -96,9 +107,8 @@ export class SceneController {
     this.naturalHeight = model.height;
     this.snapshotValue = {
       modelId: live2dCatalog.id,
-      mood: "neutral",
-      decoration: "none",
-      state: "idle",
+      state: "neutral",
+      decorations: [],
       layout: "full-body-center",
       viewport: { width: app.screen.width, height: app.screen.height },
     };
@@ -107,7 +117,7 @@ export class SceneController {
     (this.model.internalModel as unknown as InternalModelEyeBlink).eyeBlink = undefined;
     (this.model.internalModel as unknown as InternalModelEvents).on("beforeModelUpdate", this.applyPerFrame);
     this.applyLayoutImmediately();
-    void this.setState("idle");
+    void this.setState("neutral");
   }
 
   snapshot(): SceneSnapshot {
@@ -120,18 +130,17 @@ export class SceneController {
     this.applyLayoutImmediately();
   }
 
-  async setMood(id: MoodId) {
-    if (id === "neutral") {
-      this.model.internalModel.motionManager.expressionManager?.resetExpression();
-    } else {
-      await this.model.expression(live2dCatalog.moods[id]);
+  setDecorations(ids: readonly DecorationId[]): DecorationId[] {
+    if (new Set(ids).size !== ids.length) {
+      throw new Error("Decorations must not contain duplicates.");
     }
-    this.snapshotValue.mood = id;
-  }
-
-  setDecoration(id: DecorationId) {
-    this.snapshotValue.decoration = id;
+    if (ids.includes("ponytail") && ids.includes("hair-down")) {
+      throw new Error("ponytail and hair-down cannot be enabled together.");
+    }
+    const canonical = decorationIds.filter((id) => ids.includes(id));
+    this.snapshotValue.decorations = [...canonical];
     this.applyPerFrame();
+    return [...canonical];
   }
 
   /**
@@ -173,30 +182,19 @@ export class SceneController {
     ++this.currentActionGeneration;
     this.cancelActiveAction?.();
     delete this.snapshotValue.action;
-    this.snapshotValue.state = id;
-
     // Reset blink timer so a state change does not immediately blink.
+    this.snapshotValue.state = id;
     this.nextBlinkAtMs = performance.now() + this.randomBlinkInterval();
 
+    const expressionManager = this.model.internalModel.motionManager.expressionManager;
+    expressionManager?.resetExpression();
     if (state.expression === undefined) {
-      this.model.internalModel.motionManager.expressionManager?.resetExpression();
+      // The reset above is the complete expression for neutral/sleeping.
     } else {
       await this.model.expression(state.expression);
     }
-    if (state.motionGroup) {
-      void this.model.motion(state.motionGroup, state.motionIndex, MotionPriority.FORCE, {
-        resetExpression: true,
-      });
-    }
-    // Per-frame parameter overrides (e.g. sleeping keeps eyes closed) are
-    // applied automatically by applyPerFrame.
-  }
-
-  blink(): void {
-    if (this.disposed) return;
-    if (this.snapshotValue.action === "wink" || this.snapshotValue.action === "think") return;
-    if (this.snapshotValue.state === "sleeping") return;
-    this.manualBlinkPending = true;
+    this.restoreStateLoop();
+    this.applyPerFrame();
   }
 
   setStageLayout(id: StageLayoutId) {
@@ -336,10 +334,9 @@ export class SceneController {
     }
 
     if (this.blinkPhase === "open") {
-      if (now >= this.nextBlinkAtMs || this.manualBlinkPending) {
+      if (now >= this.nextBlinkAtMs) {
         this.blinkPhase = "closing";
         this.blinkPhaseStartMs = now;
-        this.manualBlinkPending = false;
       } else {
         coreModel.setParameterValueById("ParamEyeLOpen", 1);
         coreModel.setParameterValueById("ParamEyeROpen", 1);
@@ -396,9 +393,8 @@ export class SceneController {
   private restoreStateLoop(): void {
     if (this.disposed) return;
     const state = live2dCatalog.states[this.snapshotValue.state];
-    if (!state.motionGroup) return; // fake-state: per-frame params cover it
     void this.model.motion(state.motionGroup, state.motionIndex, MotionPriority.FORCE, {
-      resetExpression: true,
+      resetExpression: false,
     });
   }
 

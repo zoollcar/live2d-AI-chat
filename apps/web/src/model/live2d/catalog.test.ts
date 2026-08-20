@@ -17,8 +17,8 @@ describe("Live2D catalog", () => {
   });
 
   it("declares persistent behavioral states that map to existing motion groups", () => {
-    expect(live2dCatalog.states.idle.motionGroup).toBe("Idle");
-    expect(manifest.FileReferences.Motions.Idle).toBeDefined();
+    expect(live2dCatalog.states.neutral.motionGroup).toBe("StateNeutral");
+    expect(manifest.FileReferences.Motions.StateNeutral).toBeDefined();
 
     const sleepingParams = live2dCatalog.states.sleeping.parameters;
     expect(sleepingParams).toContainEqual({ id: "ParamEyeLOpen", value: 0 });

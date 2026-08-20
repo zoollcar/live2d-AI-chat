@@ -4,13 +4,11 @@ import { createSceneToolRegistry } from "./tools";
 
 function fakeScene(): Mocked<SceneController> {
   return {
-    setMood: vi.fn().mockResolvedValue(undefined),
-    setDecoration: vi.fn(),
+    setDecorations: vi.fn((decorations: string[]) => decorations),
     performAction: vi.fn(),
     enqueueAction: vi.fn(),
     preemptAndEnqueueAction: vi.fn(),
     setState: vi.fn().mockResolvedValue(undefined),
-    blink: vi.fn(),
     setStageLayout: vi.fn(),
   } as unknown as Mocked<SceneController>;
 }
@@ -24,15 +22,15 @@ describe("scene tools", () => {
     expect(scene.setStageLayout).toHaveBeenCalledWith("half-body-left");
   });
 
-  it("sets mood and decoration independently", async () => {
+  it("sets state and a complete decoration set", async () => {
     const scene = fakeScene();
     const registry = createSceneToolRegistry(scene, vi.fn());
-    await expect(registry.execute("setMood", { mood: "happy" }))
-      .resolves.toEqual({ ok: true, mood: "happy" });
-    await expect(registry.execute("setDecoration", { decoration: "cat-ears" }))
-      .resolves.toEqual({ ok: true, decoration: "cat-ears" });
-    expect(scene.setMood).toHaveBeenCalledWith("happy");
-    expect(scene.setDecoration).toHaveBeenCalledWith("cat-ears");
+    await expect(registry.execute("setState", { state: "happy" }))
+      .resolves.toEqual({ ok: true, state: "happy" });
+    await expect(registry.execute("setDecorations", { decorations: ["crown", "cat-ears"] }))
+      .resolves.toEqual({ ok: true, decorations: ["crown", "cat-ears"] });
+    expect(scene.setState).toHaveBeenCalledWith("happy");
+    expect(scene.setDecorations).toHaveBeenCalledWith(["crown", "cat-ears"]);
   });
 
   it("first performAction in a batch preempts, subsequent ones just enqueue", async () => {
@@ -64,23 +62,21 @@ describe("scene tools", () => {
     await expect(registry.execute("setState", { state: "running" })).rejects.toThrow();
   });
 
-  it("setState and blink forward to the scene controller", async () => {
+  it("setState forwards to the scene controller", async () => {
     const scene = fakeScene();
     const registry = createSceneToolRegistry(scene, vi.fn());
     await expect(registry.execute("setState", { state: "thinking" }))
       .resolves.toEqual({ ok: true, state: "thinking" });
     expect(scene.setState).toHaveBeenCalledWith("thinking");
-    await expect(registry.execute("blink", {})).resolves.toEqual({ ok: true });
-    expect(scene.blink).toHaveBeenCalledOnce();
   });
 
   it("rejects arbitrary layouts and unknown visual states", async () => {
     const registry = createSceneToolRegistry(fakeScene(), vi.fn());
     await expect(registry.execute("setStageLayout", { layout: { x: 10, scale: 99 } }))
       .rejects.toThrow();
-    await expect(registry.execute("setMood", { mood: "custom-file" }))
+    await expect(registry.execute("setState", { state: "custom-file" }))
       .rejects.toThrow();
-    await expect(registry.execute("setDecoration", { decoration: "custom-file" }))
+    await expect(registry.execute("setDecorations", { decorations: ["custom-file"] }))
       .rejects.toThrow();
   });
 });

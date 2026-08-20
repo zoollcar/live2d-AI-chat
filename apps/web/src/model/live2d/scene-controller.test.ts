@@ -36,7 +36,7 @@ function createHarness() {
     renderer: { resize: vi.fn() },
   };
   const controller = new SceneController(app as never, model as never);
-  // The constructor calls model.motion("Idle", 0, FORCE) via setState("idle")
+  // The constructor calls the neutral state motion and writes persistent
   // and writes decoration/state per-frame params. Clear so each test starts
   // from a clean mock call history.
   model.motion.mockClear();
@@ -49,25 +49,26 @@ async function flushMicrotasks(times = 8) {
 }
 
 describe("SceneController visual state", () => {
-  it("starts neutral with no decoration and controls mood independently", async () => {
+  it("starts neutral with no decorations and applies complete states", async () => {
     const { controller, expressionManager, model } = createHarness();
-    expect(controller.snapshot()).toMatchObject({ mood: "neutral", decoration: "none", state: "idle" });
+    expect(controller.snapshot()).toMatchObject({ state: "neutral", decorations: [] });
     expressionManager.resetExpression.mockClear();
-    await controller.setMood("happy");
+    await controller.setState("happy");
     expect(model.expression).toHaveBeenCalledWith("Happy");
-    await controller.setMood("neutral");
-    expect(expressionManager.resetExpression).toHaveBeenCalledOnce();
-    expect(controller.snapshot().mood).toBe("neutral");
+    await controller.setState("neutral");
+    expect(expressionManager.resetExpression).toHaveBeenCalledTimes(2);
+    expect(controller.snapshot().state).toBe("neutral");
   });
 
-  it("applies exactly one decoration after model updates", () => {
+  it("applies combined decorations after model updates", () => {
     const { controller, coreModel, listeners } = createHarness();
-    controller.setDecoration("cat-ears");
+    controller.setDecorations(["crown", "cat-ears"]);
     coreModel.setParameterValueById.mockClear();
     listeners.get("beforeModelUpdate")?.();
     expect(coreModel.setParameterValueById).toHaveBeenCalledWith("Param53", 1);
+    expect(coreModel.setParameterValueById).toHaveBeenCalledWith("Param40", 0);
     expect(coreModel.setParameterValueById).toHaveBeenCalledWith("Param51", 0);
-    expect(controller.snapshot().decoration).toBe("cat-ears");
+    expect(controller.snapshot().decorations).toEqual(["cat-ears", "crown"]);
   });
 
   it("queues performAction calls in one batch and plays them sequentially", async () => {
@@ -94,8 +95,8 @@ describe("SceneController visual state", () => {
     await flushMicrotasks();
     model.motion.mock.calls[0]![3].onFinish();
     await flushMicrotasks();
-    // After action completes, restoreStateLoop() restarts the idle loop at FORCE.
-    expect(model.motion).toHaveBeenLastCalledWith("Idle", 0, 3, { resetExpression: true });
+    // After action completes, restoreStateLoop() restarts the current state.
+    expect(model.motion).toHaveBeenLastCalledWith("StateNeutral", 0, 3, { resetExpression: false });
   });
 
   it("preempts pending actions when preemptAndEnqueueAction is called", async () => {
@@ -127,31 +128,9 @@ describe("SceneController visual state", () => {
     expect(actionCalls).toHaveLength(1);
     // The state's expression "疑惑" should have been applied.
     expect(model.expression).toHaveBeenCalledWith("疑惑");
-    expect(expressionManager.resetExpression).not.toHaveBeenCalled();
+    expect(expressionManager.resetExpression).toHaveBeenCalledOnce();
     expect(controller.snapshot().state).toBe("thinking");
     expect(controller.snapshot().action).toBeUndefined();
-  });
-
-  it("blink() schedules a manual blink that overrides the ambient timer", async () => {
-    const { controller, coreModel, listeners } = createHarness();
-    coreModel.setParameterValueById.mockClear();
-    // First tick: eyes are open.
-    listeners.get("beforeModelUpdate")?.();
-    expect(coreModel.setParameterValueById).toHaveBeenCalledWith("ParamEyeLOpen", 1);
-    expect(coreModel.setParameterValueById).toHaveBeenCalledWith("ParamEyeROpen", 1);
-    coreModel.setParameterValueById.mockClear();
-    // Trigger a manual blink; consume the phase-transition frame (eyes stay 1).
-    controller.blink();
-    listeners.get("beforeModelUpdate")?.();
-    // Next frame: blink phase is "closing"; advance the clock past blinkCloseMs.
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    listeners.get("beforeModelUpdate")?.();
-    const leftCalls = coreModel.setParameterValueById.mock.calls.filter((c) => c[0] === "ParamEyeLOpen");
-    const rightCalls = coreModel.setParameterValueById.mock.calls.filter((c) => c[0] === "ParamEyeROpen");
-    expect(leftCalls.length).toBeGreaterThan(0);
-    expect(rightCalls.length).toBeGreaterThan(0);
-    expect(leftCalls[leftCalls.length - 1]![1]).toBeLessThan(1);
-    expect(rightCalls[rightCalls.length - 1]![1]).toBeLessThan(1);
   });
 
   it("sleeping state keeps both eyes closed every frame", () => {
@@ -165,12 +144,12 @@ describe("SceneController visual state", () => {
     expect(rightCalls[rightCalls.length - 1]![1]).toBe(0);
   });
 
-  it("preserves mood and decoration after audio speech without preemption", async () => {
+  it("preserves state and decorations after audio speech without preemption", async () => {
     const { controller, model } = createHarness();
-    await controller.setMood("angry");
-    controller.setDecoration("crown");
+    await controller.setState("angry");
+    controller.setDecorations(["crown"]);
     await controller.speakAudio(new Blob(["audio"]));
-    expect(controller.snapshot()).toMatchObject({ mood: "angry", decoration: "crown" });
+    expect(controller.snapshot()).toMatchObject({ state: "angry", decorations: ["crown"] });
     // speakAudio no longer calls model.motion("Speak", …) — it relies solely
     // on model.speak() for lipsync. The body's motion comes from the state loop.
     const speakMotionCalls = model.motion.mock.calls.filter((c) => c[0] === "Speak");
