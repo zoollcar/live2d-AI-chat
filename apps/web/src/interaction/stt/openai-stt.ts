@@ -28,20 +28,8 @@ export class OpenAiSpeechRecognitionProvider implements SpeechRecognitionProvide
     this.callbacks = callbacks;
     this.chunks = [];
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          // Let WebRTC use the rendered speaker signal as a reference and
-          // remove it before this recording ever reaches transcription.
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
-      const track = this.stream.getAudioTracks()[0];
-      log.debug("getUserMedia acquired processed stream", {
-        tracks: this.stream.getTracks().map((t) => t.kind),
-        settings: track?.getSettings(),
-      });
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      log.debug("getUserMedia acquired stream", { tracks: this.stream.getTracks().map((t) => t.kind) });
       this.recorder = new MediaRecorder(this.stream);
       this.recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
