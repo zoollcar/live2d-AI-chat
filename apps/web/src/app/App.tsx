@@ -95,9 +95,10 @@ export default function App() {
     setRunning(false);
   }, []);
 
-  // Soft interrupt — stops the AI's current LLM stream and any in-flight TTS.
-  // It does not manipulate STT itself; callers decide whether the microphone
-  // should stay open (manual barge-in) or close (a new AI reply).
+  // Soft interrupt — stops the AI's current LLM stream and any in-flight TTS
+  // but leaves the STT session alive so the user can barge in with another
+  // utterance without re-clicking the mic. Used by `onFinal` and the mic
+  // button's "interrupt" action.
   const interruptPlayback = useCallback(() => {
     log.debug("interruptPlayback invoked", { hadAbort: !!abortRef.current });
     abortRef.current?.abort();
@@ -110,12 +111,8 @@ export default function App() {
   const sendMessage = useCallback(async (rawText: string) => {
     const text = rawText.trim();
     if (!text || !scene) return;
-    // The microphone must be off before the assistant can speak. Otherwise
-    // its own TTS is recognized as a new user utterance and interrupts itself.
-    sttRef.current?.abort();
-    sttRef.current = undefined;
-    setListening(false);
-    listeningRef.current = false;
+    // Only stop the AI's playback; keep STT alive so continuous listeners can
+    // barge in without re-clicking the mic.
     interruptPlayback();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -218,17 +215,16 @@ export default function App() {
         if (remaining) speechQueueRef.current?.enqueue(remaining);
         setStatus(STATUS_READY);
         setRunning(false);
-        // Reopen the microphone only after the final synthesized sentence has
-        // actually finished playing. Restarting on LLM completion alone lets
-        // the mic capture the still-playing TTS output.
+        // Auto-restart the mic so the next utterance flows without a click.
+        // We use restartListening() (not startListening()) because Chrome's
+        // `continuous: true` mode keeps the same recognition object alive and
+        // starts returning empty-final noise from the AI's TTS bleeding into
+        // the mic. A hard teardown + fresh session gives us a clean slate.
+        // Skip this when the user just typed the message — they explicitly
+        // chose text input, so the mic should stay off until they click it.
         if (continuousRef.current && !userTypedRef.current) {
-          void speechQueueRef.current?.whenIdle().then(() => {
-            // A later turn/cancel supersedes this reply, so it must not reopen
-            // the microphone while another response is in progress.
-            if (abortRef.current !== controller || controller.signal.aborted || !continuousRef.current) return;
-            log.debug("assistant speech finished — auto-restarting listener (fresh session)");
-            void restartListeningRef.current?.();
-          });
+          log.debug("agent done — auto-restarting listener (fresh session)");
+          void restartListeningRef.current?.();
         }
         userTypedRef.current = false;
       }
@@ -251,7 +247,9 @@ export default function App() {
 
   const startListening = useCallback(async () => {
     log.debug("startListening: invoked", { provider: settings.stt.provider, lang: settings.stt.language });
-    // Tear down any prior STT instance before opening a fresh session.
+    // Tear down any prior STT instance — this is the only safe path that
+    // touches the mic. sendMessage() no longer aborts STT, so this is the
+    // sole place that does.
     sttRef.current?.abort();
     sttRef.current = undefined;
     const provider = createSttProvider(settings.stt);
@@ -322,15 +320,20 @@ export default function App() {
   }, [interruptPlayback, settings.stt]);
 
   // Force a clean STT session: abort whatever's running and start fresh. This
-  // is what the auto-restart path uses after the assistant's TTS finishes,
-  // so the new recognition session cannot contain speaker feedback.
+  // is what the auto-restart path uses after the LLM finishes speaking,
+  // because Chrome's `continuous: true` mode never fires `onend` on its own —
+  // it keeps the same recognition object alive across turns and starts
+  // returning bogus empty-final results once the AI's TTS bleeds into the
+  // mic. A hard restart gives us a clean Chrome session per turn.
   const restartListening = useCallback(async () => {
     log.debug("restartListening: tearing down STT for fresh session");
     sttRef.current?.abort();
     sttRef.current = undefined;
     setListening(false);
     listeningRef.current = false;
-    // Leave a small gap after playback before opening the microphone.
+    // Small grace period so the user can hear the AI's last sentence fully
+    // before the mic reopens — keeps feedback from being interpreted as the
+    // user's next utterance.
     await new Promise((resolve) => setTimeout(resolve, 250));
     await startListeningRef.current?.();
   }, []);
