@@ -24,6 +24,28 @@ interface Status {
 }
 
 const STATUS_READY: Status = { kind: "idle", message: "Ready" };
+const ECHO_MEMORY_MS = 15_000;
+
+interface SpokenSentence {
+  text: string;
+  playedAt: number;
+}
+
+function normalizeSpeech(text: string) {
+  return text.toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
+}
+
+function isLikelyTtsEcho(transcript: string, spoken: SpokenSentence[]) {
+  const candidate = normalizeSpeech(transcript);
+  if (candidate.length < 2) return false;
+  const cutoff = Date.now() - ECHO_MEMORY_MS;
+  return spoken.some(({ text, playedAt }) => {
+    const reference = normalizeSpeech(text);
+    return playedAt >= cutoff
+      && reference.length >= 2
+      && (reference.includes(candidate) || candidate.includes(reference));
+  });
+}
 
 export default function App() {
   const { settings, hydrated, hydrateSecrets } = useSettingsStore();
@@ -39,6 +61,7 @@ export default function App() {
   const sttRef = useRef<SpeechRecognitionProvider | undefined>(undefined);
   const speechQueueRef = useRef<SpeechQueue | undefined>(undefined);
   const segmenterRef = useRef(new SentenceSegmenter());
+  const recentAssistantSpeechRef = useRef<SpokenSentence[]>([]);
   // Tracks whether continuous recognition should be active across turns so the
   // auto-restart effect can decide whether to reopen the mic once the AI is
   // done talking. The ref (not state) is read inside async callbacks where we
@@ -63,7 +86,14 @@ export default function App() {
     if (!scene) return;
     speechQueueRef.current?.cancel();
     const provider = createTtsProvider(settings.tts);
-    speechQueueRef.current = new SpeechQueue(provider, settings.tts, scene, setSubtitle);
+    speechQueueRef.current = new SpeechQueue(provider, settings.tts, scene, (sentence) => {
+      const playedAt = Date.now();
+      recentAssistantSpeechRef.current = [
+        ...recentAssistantSpeechRef.current.filter((item) => item.playedAt >= playedAt - ECHO_MEMORY_MS),
+        { text: sentence, playedAt },
+      ].slice(-4);
+      setSubtitle(sentence);
+    });
     return () => speechQueueRef.current?.cancel();
   }, [scene, settings.tts]);
 
@@ -95,9 +125,8 @@ export default function App() {
     setRunning(false);
   }, []);
 
-  // Soft interrupt — stops the AI's current LLM stream and any in-flight TTS.
-  // It does not manipulate STT itself; callers decide whether the microphone
-  // should stay open (manual barge-in) or close (a new AI reply).
+  // Soft interrupt — stops the AI's current LLM stream and any in-flight TTS
+  // while leaving STT active for full-duplex user barge-in.
   const interruptPlayback = useCallback(() => {
     log.debug("interruptPlayback invoked", { hadAbort: !!abortRef.current });
     abortRef.current?.abort();
@@ -110,12 +139,6 @@ export default function App() {
   const sendMessage = useCallback(async (rawText: string) => {
     const text = rawText.trim();
     if (!text || !scene) return;
-    // The microphone must be off before the assistant can speak. Otherwise
-    // its own TTS is recognized as a new user utterance and interrupts itself.
-    sttRef.current?.abort();
-    sttRef.current = undefined;
-    setListening(false);
-    listeningRef.current = false;
     interruptPlayback();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -218,18 +241,6 @@ export default function App() {
         if (remaining) speechQueueRef.current?.enqueue(remaining);
         setStatus(STATUS_READY);
         setRunning(false);
-        // Reopen the microphone only after the final synthesized sentence has
-        // actually finished playing. Restarting on LLM completion alone lets
-        // the mic capture the still-playing TTS output.
-        if (continuousRef.current && !userTypedRef.current) {
-          void speechQueueRef.current?.whenIdle().then(() => {
-            // A later turn/cancel supersedes this reply, so it must not reopen
-            // the microphone while another response is in progress.
-            if (abortRef.current !== controller || controller.signal.aborted || !continuousRef.current) return;
-            log.debug("assistant speech finished — auto-restarting listener (fresh session)");
-            void restartListeningRef.current?.();
-          });
-        }
         userTypedRef.current = false;
       }
     };
@@ -265,8 +276,15 @@ export default function App() {
         },
         onFinal: (text) => {
           log.debug("onFinal", { length: text.length, text });
-          setSubtitle(text);
           if (!text) return;
+          // AEC is the primary defence. This secondary guard rejects only a
+          // transcript that reproduces recently played TTS, while unrelated
+          // user speech still interrupts immediately.
+          if (speechQueueRef.current?.isSpeaking() && isLikelyTtsEcho(text, recentAssistantSpeechRef.current)) {
+            log.debug("ignoring likely TTS echo", { text });
+            return;
+          }
+          setSubtitle(text);
           // Barge-in: cut the AI's playback but keep this STT session alive
           // so the next utterance flows through the same recognition stream.
           interruptPlayback();
@@ -321,9 +339,7 @@ export default function App() {
     }
   }, [interruptPlayback, settings.stt]);
 
-  // Force a clean STT session: abort whatever's running and start fresh. This
-  // is what the auto-restart path uses after the assistant's TTS finishes,
-  // so the new recognition session cannot contain speaker feedback.
+  // Force a clean STT session after a browser-driven recognition end.
   const restartListening = useCallback(async () => {
     log.debug("restartListening: tearing down STT for fresh session");
     sttRef.current?.abort();

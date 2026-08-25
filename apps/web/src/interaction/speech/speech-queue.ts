@@ -7,7 +7,6 @@ export class SpeechQueue {
   private running = false;
   private controller = new AbortController();
   private generation = 0;
-  private idleResolvers: Array<() => void> = [];
 
   constructor(
     private readonly provider: SpeechSynthesisProvider,
@@ -30,13 +29,10 @@ export class SpeechQueue {
     this.provider.cancel();
     this.scene.stopSpeech();
     this.running = false;
-    this.resolveIdle();
   }
 
-  /** Resolves once all queued speech has finished playing (or is cancelled). */
-  whenIdle() {
-    if (!this.running && this.queue.length === 0) return Promise.resolve();
-    return new Promise<void>((resolve) => this.idleResolvers.push(resolve));
+  isSpeaking() {
+    return this.running || this.queue.length > 0;
   }
 
   private async pump() {
@@ -69,16 +65,7 @@ export class SpeechQueue {
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) console.error(error);
     } finally {
-      if (generation === this.generation) {
-        this.running = false;
-        if (this.queue.length === 0) this.resolveIdle();
-      }
+      if (generation === this.generation) this.running = false;
     }
-  }
-
-  private resolveIdle() {
-    const resolvers = this.idleResolvers;
-    this.idleResolvers = [];
-    resolvers.forEach((resolve) => resolve());
   }
 }
