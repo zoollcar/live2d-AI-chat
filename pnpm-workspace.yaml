@@ -6,7 +6,7 @@ allowBuilds:
   esbuild: true
   protobufjs: true
 minimumReleaseAgeExclude:
-  - '@ai-sdk/gateway@4.0.52'
+  - '@ai-sdk/gateway@4.0.64'
   - '@hono/node-server@2.1.1'
-  - ai@7.0.65
-  - hono@4.13.2
+  - ai@7.0.79
+  - hono@4.13.5

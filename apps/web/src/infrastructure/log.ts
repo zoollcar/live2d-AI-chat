@@ -8,19 +8,15 @@ export function createLogger(tag: string) {
   const prefix = `[${tag}]`;
   return {
     debug(message: string, ...details: unknown[]) {
-      // eslint-disable-next-line no-console
       console.log(`${stamp()} ${prefix} ${message} ${formatDetails(details)}`.trimEnd());
     },
     info(message: string, ...details: unknown[]) {
-      // eslint-disable-next-line no-console
       console.info(`${stamp()} ${prefix} ${message} ${formatDetails(details)}`.trimEnd());
     },
     warn(message: string, ...details: unknown[]) {
-      // eslint-disable-next-line no-console
       console.warn(`${stamp()} ${prefix} ${message} ${formatDetails(details)}`.trimEnd());
     },
     error(message: string, ...details: unknown[]) {
-      // eslint-disable-next-line no-console
       console.error(`${stamp()} ${prefix} ${message} ${formatDetails(details)}`.trimEnd());
     },
   };
