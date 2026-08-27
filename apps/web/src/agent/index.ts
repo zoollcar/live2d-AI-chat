@@ -13,4 +13,9 @@ export function createAgentRuntime(settings: LlmSettings): AgentRuntime {
   return new RemoteAgentRuntime();
 }
 
+export function summarizeWithLocalModel(prompt: string, settings: LlmSettings, signal: AbortSignal): Promise<string> {
+  localRuntime ||= new LocalAgentRuntime();
+  return localRuntime.summarize(prompt, settings, signal);
+}
+
 export type { AgentEvent, AgentRuntime, ChatMessage, StatusKind, ToolCallRecord } from "./types";

@@ -1,15 +1,22 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createAgentRuntime, type AgentEvent, type ChatMessage } from "@/agent";
+import { summarizeConversation } from "@/agent/conversation-summarizer";
 import { prefixAgentStatus } from "@/agent/status-context";
 import type { StatusKind } from "@/agent/types";
-import { SYSTEM_MESSAGE } from "@/agent/system-prompt";
+import { createSystemMessage } from "@/agent/system-prompt";
+import { useCharacterStore } from "@/infrastructure/character/store";
 import { useSettingsStore } from "@/infrastructure/config/store";
+import { useConversationStore, type NewConversationInput } from "@/infrastructure/conversation/store";
 import { createLogger } from "@/infrastructure/log";
 import { createSttProvider, type SpeechRecognitionProvider } from "@/interaction/stt";
 import { SpeechQueue } from "@/interaction/speech/speech-queue";
 import { SentenceSegmenter } from "@/interaction/speech/sentence-segmenter";
 import { createTtsProvider } from "@/interaction/tts";
+import type { CharacterProfile } from "@/model/character-profile";
+import { createModelSnapshot } from "@/model/conversation";
+import { buildRuntimeConversationMessages, planConversationCompaction } from "@/model/conversation-compaction";
 import type { SceneController } from "@/model/live2d/scene-controller";
+import type { LlmSettings } from "@live2d-chat/shared";
 import { Live2DStage } from "@/presentation/stage/Live2DStage";
 
 const log = createLogger("app");
@@ -23,15 +30,67 @@ interface Status {
   progress?: number;
 }
 
+interface MemoryStatus {
+  kind: "busy" | "idle" | "error";
+  message: string;
+}
+
 const STATUS_READY: Status = { kind: "idle", message: "Ready" };
+
+function conversationSeed(profile: CharacterProfile, settings: LlmSettings): NewConversationInput {
+  return {
+    characterId: profile.id,
+    modelSnapshot: createModelSnapshot(settings),
+    messages: [
+      createSystemMessage(profile),
+      ...(profile.firstMessage ? [{ role: "assistant", content: profile.firstMessage } satisfies ChatMessage] : []),
+    ],
+  };
+}
+
+function latestVisibleMessage(messages: readonly ChatMessage[], fallback: string): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role !== "system" && message.content.trim()) return message.content;
+  }
+  return fallback;
+}
 
 export default function App() {
   const { settings, hydrated, hydrateSecrets } = useSettingsStore();
+  const { profiles, activeProfileId, setActiveProfile } = useCharacterStore();
+  const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? profiles[0];
+  const {
+    conversations,
+    activeConversationId,
+    hydrated: conversationsHydrated,
+    hydrate: hydrateConversations,
+    create: createConversation,
+    select: selectConversation,
+    updateMessages: setMessages,
+    applyCompaction,
+    flushActive: flushActiveConversation,
+    delete: deleteConversation,
+  } = useConversationStore();
+  const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId);
+  const messages = activeConversation?.messages ?? [];
+  const conversationLlmSettings = useMemo(() => ({
+    ...settings.llm,
+    ...(activeConversation?.modelSnapshot ?? {}),
+  }), [activeConversation?.modelSnapshot, settings.llm]);
+  const effectiveTtsSettings = useMemo(() => ({
+    ...settings.tts,
+    ...(activeProfile.voice.ttsProvider ? { provider: activeProfile.voice.ttsProvider } : {}),
+    ...(activeProfile.voice.voice !== undefined ? { voice: activeProfile.voice.voice } : {}),
+    ...(activeProfile.voice.language !== undefined ? { language: activeProfile.voice.language } : {}),
+    ...(activeProfile.voice.rate !== undefined ? { rate: activeProfile.voice.rate } : {}),
+    ...(activeProfile.voice.pitch !== undefined ? { pitch: activeProfile.voice.pitch } : {}),
+  }), [activeProfile.voice, settings.tts]);
   const [scene, setScene] = useState<SceneController>();
-  const [messages, setMessages] = useState<ChatMessage[]>([SYSTEM_MESSAGE]);
   const [input, setInput] = useState("");
   const [subtitle, setSubtitle] = useState("Loading the Live2D model…");
   const [status, setStatus] = useState<Status>({ kind: "busy", message: "Initializing stage" });
+  const [memoryStatus, setMemoryStatus] = useState<MemoryStatus>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [listening, setListening] = useState(false);
   const [running, setRunning] = useState(false);
@@ -54,18 +113,68 @@ export default function App() {
   // the mic would pop back on whenever `settings.stt.continuous` is on —
   // which is wrong because the user explicitly chose to type rather than speak.
   const userTypedRef = useRef(false);
+  const activeConversationRef = useRef(activeConversation);
+  const compactionControllersRef = useRef(new Map<string, AbortController>());
+  const memoryStatusTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => { activeConversationRef.current = activeConversation; }, [activeConversation]);
 
   useEffect(() => {
     if (!hydrated) hydrateSecrets();
   }, [hydrateSecrets, hydrated]);
 
   useEffect(() => {
+    if (!conversationsHydrated) void hydrateConversations(conversationSeed(activeProfile, settings.llm));
+  }, [activeProfile, conversationsHydrated, hydrateConversations, settings.llm]);
+
+  useEffect(() => {
+    if (!activeConversation) return;
+    const characterState = useCharacterStore.getState();
+    if (activeConversation.characterId === characterState.activeProfileId) return;
+    const conversationProfile = characterState.profiles.find((profile) => profile.id === activeConversation.characterId);
+    if (conversationProfile) setActiveProfile(conversationProfile.id);
+  }, [activeConversation?.characterId, activeConversation?.id, setActiveProfile]);
+
+  useEffect(() => {
+    if (!activeConversation || (conversationLlmSettings.transport === "local" && running)) return;
+    const plan = planConversationCompaction(activeConversation);
+    if (!plan || compactionControllersRef.current.has(activeConversation.id)) return;
+    const controller = new AbortController();
+    compactionControllersRef.current.set(activeConversation.id, controller);
+    if (memoryStatusTimerRef.current) clearTimeout(memoryStatusTimerRef.current);
+    setMemoryStatus({ kind: "busy", message: `Memory: compressing ${activeConversation.title}` });
+    void summarizeConversation(plan, conversationLlmSettings, controller.signal)
+      .then(async (summary) => {
+        const applied = await applyCompaction(plan, summary);
+        if (!applied) return;
+        setMemoryStatus({ kind: "idle", message: "Memory compressed" });
+        memoryStatusTimerRef.current = setTimeout(() => setMemoryStatus(undefined), 2500);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) {
+          setMemoryStatus(undefined);
+          return;
+        }
+        setMemoryStatus({
+          kind: "error",
+          message: `Memory compression failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+        });
+      })
+      .finally(() => compactionControllersRef.current.delete(activeConversation.id));
+  }, [activeConversation, applyCompaction, conversationLlmSettings, running]);
+
+  useEffect(() => () => {
+    for (const controller of compactionControllersRef.current.values()) controller.abort();
+    if (memoryStatusTimerRef.current) clearTimeout(memoryStatusTimerRef.current);
+  }, []);
+
+  useEffect(() => {
     if (!scene) return;
     speechQueueRef.current?.cancel();
-    const provider = createTtsProvider(settings.tts);
-    speechQueueRef.current = new SpeechQueue(provider, settings.tts, scene, setSubtitle);
+    const provider = createTtsProvider(effectiveTtsSettings);
+    speechQueueRef.current = new SpeechQueue(provider, effectiveTtsSettings, scene, setSubtitle);
     return () => speechQueueRef.current?.cancel();
-  }, [scene, settings.tts]);
+  }, [effectiveTtsSettings, scene]);
 
   // Mirror `messages` into a ref so `sendMessage` can read the latest history
   // snapshot regardless of which version of the callback actually runs.
@@ -73,7 +182,7 @@ export default function App() {
   // sendMessage on every message update, but the recognition callbacks that
   // fire onFinal would still hold the first version and replay the original
   // exchange forever.
-  const messagesRef = useRef(messages);
+  const messagesRef = useRef<ChatMessage[]>(messages);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
 
   const visibleMessages = useMemo(() => messages.filter((message) => message.role !== "system"), [messages]);
@@ -108,9 +217,28 @@ export default function App() {
     setRunning(false);
   }, []);
 
+  useEffect(() => {
+    if (!scene) return;
+    let cancelled = false;
+    stopEverything();
+    setSubtitle(latestVisibleMessage(activeConversation?.messages ?? [], activeProfile.firstMessage));
+    setStatus({ kind: "busy", message: `Loading ${activeProfile.name}` });
+    scene.setDecorations(activeProfile.live2d.defaultDecorations);
+    scene.setStageLayout(activeProfile.live2d.defaultLayout);
+    void scene.setState(activeProfile.live2d.defaultState).then(() => {
+      if (!cancelled) setStatus(STATUS_READY);
+    }).catch((error) => {
+      if (!cancelled) setStatus({ kind: "error", message: `Character switch failed: ${error instanceof Error ? error.message : "Unknown error"}` });
+    });
+    return () => { cancelled = true; };
+  }, [activeConversation?.id, activeProfile, scene, stopEverything]);
+
   const sendMessage = useCallback(async (rawText: string) => {
     const text = rawText.trim();
     if (!text || !scene) return;
+    if (conversationLlmSettings.transport === "local" && activeConversationId) {
+      compactionControllersRef.current.get(activeConversationId)?.abort();
+    }
     // Only stop the AI's playback; keep STT alive so continuous listeners can
     // barge in without re-clicking the mic.
     interruptPlayback();
@@ -121,19 +249,22 @@ export default function App() {
     // registered before subsequent messages were appended).
     const userMessage: ChatMessage = { role: "user", content: text };
     const history: ChatMessage[] = [...messagesRef.current, userMessage];
+    const contextHistory = activeConversationRef.current
+      ? buildRuntimeConversationMessages(activeConversationRef.current)
+      : messagesRef.current;
     // Keep React history pristine for display and future turns. Only the
     // current runtime request sees the changing environment block, placed at
     // the end of the multi-turn prompt to preserve the longest stable prefix.
     const runtimeHistory: ChatMessage[] = [
-      ...messagesRef.current,
+      ...contextHistory,
       { ...userMessage, content: prefixAgentStatus(text, scene.snapshot()) },
     ];
-    setMessages([...history, { role: "assistant", content: "" }]);
+    setMessages(() => [...history, { role: "assistant", content: "" }]);
     setInput("");
     setSubtitle(text);
     setStatus({ kind: "busy", message: "AI is thinking" });
     setRunning(true);
-    const runtime = createAgentRuntime(settings.llm);
+    const runtime = createAgentRuntime(conversationLlmSettings);
 
     const emit = (event: AgentEvent) => {
       if (event.type === "text-delta") {
@@ -210,11 +341,13 @@ export default function App() {
       } else if (event.type === "error") {
         setStatus({ kind: "error", message: `Error: ${event.error.message}` });
         setRunning(false);
+        void flushActiveConversation();
       } else if (event.type === "done") {
         const remaining = segmenterRef.current.flush();
         if (remaining) speechQueueRef.current?.enqueue(remaining);
         setStatus(STATUS_READY);
         setRunning(false);
+        void flushActiveConversation();
         // Auto-restart the mic so the next utterance flows without a click.
         // We use restartListening() (not startListening()) because Chrome's
         // `continuous: true` mode keeps the same recognition object alive and
@@ -230,8 +363,8 @@ export default function App() {
       }
     };
 
-    await runtime.run({ messages: runtimeHistory, settings: settings.llm, scene, signal: controller.signal, emit });
-  }, [interruptPlayback, scene, settings.llm]);
+    await runtime.run({ messages: runtimeHistory, settings: conversationLlmSettings, scene, signal: controller.signal, emit });
+  }, [activeConversationId, conversationLlmSettings, flushActiveConversation, interruptPlayback, scene, setMessages]);
 
   // startListeningRef mirrors `startListening` so async callbacks above can
   // reach the latest version without rebuilding sendMessage every time STT
@@ -417,6 +550,42 @@ export default function App() {
     setStatus({ kind: "error", message: `Model failed to load: ${error.message}` });
   }, []);
 
+  const onCreateConversation = useCallback(async () => {
+    stopEverything();
+    await createConversation(conversationSeed(activeProfile, settings.llm));
+  }, [activeProfile, createConversation, settings.llm, stopEverything]);
+
+  const onActivateCharacter = useCallback(async (profile: CharacterProfile) => {
+    stopEverything();
+    setActiveProfile(profile.id);
+    await createConversation(conversationSeed(profile, settings.llm));
+  }, [createConversation, setActiveProfile, settings.llm, stopEverything]);
+
+  const onSelectConversation = useCallback(async (id: string) => {
+    const conversation = useConversationStore.getState().conversations.find((item) => item.id === id);
+    if (!conversation) return;
+    const profile = useCharacterStore.getState().profiles.find((item) => item.id === conversation.characterId);
+    if (!profile) throw new Error(`Character profile ${conversation.characterId} is not available.`);
+    stopEverything();
+    setActiveProfile(profile.id);
+    await selectConversation(id);
+  }, [selectConversation, setActiveProfile, stopEverything]);
+
+  const onDeleteConversation = useCallback(async (id: string) => {
+    stopEverything();
+    await deleteConversation(id, conversationSeed(activeProfile, settings.llm));
+    const next = useConversationStore.getState().conversations.find((item) =>
+      item.id === useConversationStore.getState().activeConversationId);
+    const profile = next && useCharacterStore.getState().profiles.find((item) => item.id === next.characterId);
+    if (profile) setActiveProfile(profile.id);
+  }, [activeProfile, deleteConversation, setActiveProfile, settings.llm, stopEverything]);
+
+  useEffect(() => {
+    const flush = () => { void flushActiveConversation(); };
+    window.addEventListener("pagehide", flush);
+    return () => window.removeEventListener("pagehide", flush);
+  }, [flushActiveConversation]);
+
   return (
     <main className="app-shell">
       <div className="ambient ambient-one" />
@@ -427,21 +596,28 @@ export default function App() {
         <div className="brand">
           <img className="brand-mark" src="/brand/ice-girl-logo.png" alt="" aria-hidden="true" />
           <div>
-            <strong>Live2D AI</strong>
-            <small className={`status-chip status-${status.kind}`} aria-live="polite">
-              <span className="status-message">{status.message}</span>
-              {status.kind === "progress" && typeof status.progress === "number" && (
-                <span
-                  className="status-progress"
-                  role="progressbar"
-                  aria-valuenow={Math.round(status.progress * 100)}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                >
-                  <span style={{ width: `${Math.round(status.progress * 100)}%` }} />
-                </span>
-              )}
-            </small>
+            <strong>{activeProfile.name}</strong>
+            <div className="status-chips" aria-live="polite">
+              <small className={`status-chip status-${status.kind}`}>
+                <span className="status-message">{status.message}</span>
+                {status.kind === "progress" && typeof status.progress === "number" ? (
+                  <span
+                    className="status-progress"
+                    role="progressbar"
+                    aria-valuenow={Math.round(status.progress * 100)}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                  >
+                    <span style={{ width: `${Math.round(status.progress * 100)}%` }} />
+                  </span>
+                ) : null}
+              </small>
+              {memoryStatus ? (
+                <small className={`status-chip memory-status status-${memoryStatus.kind}`}>
+                  <span className="status-message">{memoryStatus.message}</span>
+                </small>
+              ) : null}
+            </div>
           </div>
         </div>
         <button className="icon-button" onClick={() => setSettingsOpen(true)} aria-label="Open settings">⚙</button>
@@ -469,10 +645,13 @@ export default function App() {
       {settingsOpen ? (
         <Suspense fallback={<div className="settings-loading">Loading settings…</div>}>
           <SettingsPanel open onClose={() => setSettingsOpen(false)}
-            messages={visibleMessages}
+            onActivateCharacter={onActivateCharacter}
+            onCreateConversation={onCreateConversation}
+            onDeleteConversation={onDeleteConversation}
+            onSelectConversation={onSelectConversation}
             onTestStt={() => void startListening()}
             onTestTts={() => speechQueueRef.current?.enqueue(
-              settings.tts.language.toLowerCase().startsWith("zh")
+              effectiveTtsSettings.language.toLowerCase().startsWith("zh")
                 ? "你好，这是一段语音合成测试。"
                 : "Hello, this is a speech synthesis test.",
             )} />

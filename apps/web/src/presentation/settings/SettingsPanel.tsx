@@ -1,6 +1,5 @@
 import type { LlmSettings, SttSettings, TtsSettings } from "@live2d-chat/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChatMessage, ToolCallRecord } from "@/agent";
 import {
   downloadLocalModel,
   getLocalModelPartialProgress,
@@ -9,57 +8,21 @@ import {
 } from "@/agent/local-models";
 import { normalizeBaseUrl } from "@/infrastructure/config/defaults";
 import { useSettingsStore } from "@/infrastructure/config/store";
+import { useCharacterStore } from "@/infrastructure/character/store";
+import { useConversationStore } from "@/infrastructure/conversation/store";
 import { fetchGoogleCloudVoices, type GoogleCloudVoice } from "@/interaction/tts/google-cloud-tts";
 import { downloadVitsVoice, getVitsVoicePartialProgress, isVitsVoiceDownloaded } from "@/interaction/tts/model-download";
-
-// JSON.stringify replacer used to render tool call input/output blocks. Strips
-// circular / non-serialisable values so a poorly-shaped tool argument never
-// blows up the chat history dialog. The renderer falls back to `String(value)`
-// for anything JSON.stringify can't handle (functions, symbols, bigints, …).
-function safeStringify(value: unknown): string {
-  const seen = new WeakSet<object>();
-  try {
-    return JSON.stringify(
-      value,
-      (_key, raw) => {
-        if (typeof raw === "function" || typeof raw === "symbol" || typeof raw === "bigint") return String(raw);
-        if (raw && typeof raw === "object") {
-          if (seen.has(raw as object)) return "[Circular]";
-          seen.add(raw as object);
-        }
-        return raw;
-      },
-      2,
-    ) ?? String(value);
-  } catch {
-    return String(value);
-  }
-}
-
-function ToolCallEntry({ call }: { call: ToolCallRecord }) {
-  const inputText = safeStringify(call.input);
-  const outputText = call.output !== undefined ? safeStringify(call.output) : call.error;
-  return (
-    <details className="history-tool-call">
-      <summary>{call.name}</summary>
-      <div className="history-tool-call-body">
-        <div className="history-tool-call-block">
-          <span className="history-tool-call-label">Input</span>
-          <pre>{inputText}</pre>
-        </div>
-        <div className="history-tool-call-block">
-          <span className="history-tool-call-label">{call.error ? "Error" : "Output"}</span>
-          <pre>{outputText}</pre>
-        </div>
-      </div>
-    </details>
-  );
-}
+import type { CharacterProfile } from "@/model/character-profile";
+import { CharacterProfileEditor } from "./CharacterProfileEditor";
+import { ConversationLibrary } from "./ConversationLibrary";
 
 interface Props {
   open: boolean;
-  messages: ChatMessage[];
   onClose(): void;
+  onActivateCharacter(profile: CharacterProfile): Promise<void>;
+  onCreateConversation(): Promise<void>;
+  onDeleteConversation(id: string): Promise<void>;
+  onSelectConversation(id: string): Promise<void>;
   onTestStt(): void;
   onTestTts(): void;
 }
@@ -187,8 +150,23 @@ const localVoices: Record<string, ModelOption[]> = {
   ],
 };
 
-export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }: Props) {
+export function SettingsPanel({
+  open,
+  onClose,
+  onActivateCharacter,
+  onCreateConversation,
+  onDeleteConversation,
+  onSelectConversation,
+  onTestStt,
+  onTestTts,
+}: Props) {
   const { settings, updateLlm, updateStt, updateTts, setSubtitlesEnabled, reset } = useSettingsStore();
+  const activeConversation = useConversationStore((state) =>
+    state.conversations.find((conversation) => conversation.id === state.activeConversationId));
+  const activeCharacter = useCharacterStore((state) =>
+    state.profiles.find((profile) => profile.id === state.activeProfileId) ?? state.profiles[0]);
+  const characterCount = useCharacterStore((state) => state.profiles.length);
+  const visibleMessageCount = activeConversation?.messages.filter((message) => message.role !== "system").length ?? 0;
   const [connectionStatus, setConnectionStatus] = useState("");
   const [discoverState, setDiscoverState] = useState<DiscoverState>({ status: "idle" });
   const [googleVoiceState, setGoogleVoiceState] = useState<GoogleVoiceState>({ status: "idle", voices: [] });
@@ -202,6 +180,7 @@ export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }:
   const [voiceDownloadStatus, setVoiceDownloadStatus] = useState("");
   const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [charactersOpen, setCharactersOpen] = useState(false);
   const [proxyProviders, setProxyProviders] = useState<LlmProvider[]>(defaultProxyProviders);
   const llmAbortRef = useRef<AbortController | undefined>(undefined);
   const voiceAbortRef = useRef<AbortController | undefined>(undefined);
@@ -515,9 +494,17 @@ export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }:
         <section className="settings-section history-setting">
           <div>
             <h3>Conversation</h3>
-            <span className="status-copy">{messages.length} message{messages.length === 1 ? "" : "s"} in this chat</span>
+            <span className="status-copy">{visibleMessageCount} message{visibleMessageCount === 1 ? "" : "s"} in this chat</span>
           </div>
           <button onClick={() => setHistoryOpen(true)}>View chat history</button>
+        </section>
+
+        <section className="settings-section history-setting">
+          <div>
+            <h3>Character profile</h3>
+            <span className="status-copy">{activeCharacter.name} · {characterCount} profile{characterCount === 1 ? "" : "s"}</span>
+          </div>
+          <button onClick={() => setCharactersOpen(true)}>Manage characters</button>
         </section>
 
         <section className="settings-section">
@@ -761,44 +748,21 @@ export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }:
         </section>
       </aside>
 
-      {historyOpen && (
-        <div className="history-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setHistoryOpen(false)}>
-          <section className="history-dialog" role="dialog" aria-modal="true" aria-labelledby="history-title">
-            <header className="history-header">
-              <div><p className="eyebrow">CURRENT CHAT</p><h2 id="history-title">Chat history</h2></div>
-              <button className="icon-button" onClick={() => setHistoryOpen(false)} aria-label="Close chat history">×</button>
-            </header>
-            {messages.length === 0 ? (
-              <div className="history-empty">No messages yet. Start a conversation to see it here.</div>
-            ) : (
-              <div className="history-list">
-                {messages.map((message, index) => (
-                  <article className={`history-message ${message.role}`} key={`${index}-${message.role}`}>
-                    <span>{message.role === "user" ? "User" : "Assistant"}</span>
-                    <p>{message.content || "…"}</p>
-                    {message.role === "assistant" && message.reasoning && (
-                      <details className="history-thinking">
-                        <summary>Thinking</summary>
-                        <pre>{message.reasoning}</pre>
-                      </details>
-                    )}
-                    {message.role === "assistant" && message.toolCalls && message.toolCalls.length > 0 && (
-                      <details className="history-tool-calls">
-                        <summary>Tool calls ({message.toolCalls.length})</summary>
-                        <div className="history-tool-calls-list">
-                          {message.toolCalls.map((call, callIndex) => (
-                            <ToolCallEntry key={`${callIndex}-${call.name}`} call={call} />
-                          ))}
-                        </div>
-                      </details>
-                    )}
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
-      )}
+      {historyOpen ? (
+        <ConversationLibrary
+          onClose={() => setHistoryOpen(false)}
+          onCreateConversation={onCreateConversation}
+          onDeleteConversation={onDeleteConversation}
+          onSelectConversation={onSelectConversation}
+        />
+      ) : null}
+
+      {charactersOpen ? (
+        <CharacterProfileEditor
+          onActivateProfile={onActivateCharacter}
+          onClose={() => setCharactersOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

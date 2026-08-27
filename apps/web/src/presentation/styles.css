@@ -15,13 +15,14 @@ button { cursor: pointer; }
 .brand { display: flex; align-items: center; gap: 12px; }
 .brand-mark { display: block; width: 44px; height: 44px; object-fit: contain; filter: drop-shadow(0 5px 10px rgba(93,205,255,.22)); }
 .brand strong, .brand small { display: block; }
+.status-chips { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
 
 /* Status chip rendered under the title. The kind class drives colour,
    animation, and whether an inline progress bar is shown so the user can
    see what the app is doing (idle, busy, progress, error). */
 .status-chip {
   display: inline-flex; align-items: center; gap: 6px;
-  margin-top: 4px; padding: 3px 9px; border-radius: 999px;
+  padding: 3px 9px; border-radius: 999px;
   max-width: 240px; overflow: hidden;
   font-size: 11px; line-height: 1; color: #a9a2b8;
   background: rgba(255,255,255,.06);
@@ -31,6 +32,8 @@ button { cursor: pointer; }
   display: inline-block; max-width: 200px; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap;
 }
+.memory-status { max-width: min(320px, 42vw); }
+.memory-status .status-message { max-width: min(280px, 36vw); }
 .status-chip.status-idle { color: #a9a2b8; background: rgba(255,255,255,.05); }
 .status-chip.status-busy {
   color: #f3a1c7; background: rgba(243,161,199,.12);
@@ -103,9 +106,39 @@ button { cursor: pointer; }
 .history-setting button { justify-self: end; }
 .history-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 24px; background: rgba(2,2,5,.7); backdrop-filter: blur(10px); }
 .history-dialog { display: flex; flex-direction: column; width: min(680px, 100%); max-height: min(720px, calc(100vh - 48px)); overflow: hidden; border: 1px solid rgba(255,255,255,.12); border-radius: 24px; background: #12101b; box-shadow: 0 28px 90px rgba(0,0,0,.55); }
+.history-dialog.conversation-library { width: min(1040px, 100%); height: min(760px, calc(100vh - 48px)); }
+.history-dialog.character-profile-dialog { width: min(780px, 100%); height: min(760px, calc(100vh - 48px)); }
 .history-header { display: flex; align-items: center; justify-content: space-between; padding: 22px 24px 18px; border-bottom: 1px solid rgba(255,255,255,.09); }
 .history-header h2 { margin: 4px 0 0; font-size: 24px; }
+.history-header-actions { display: flex; align-items: center; gap: 8px; }
+.history-header-actions button { border: 1px solid rgba(255,255,255,.13); border-radius: 10px; padding: 8px 11px; color: #fff; background: rgba(255,255,255,.07); }
+.history-header-actions .icon-button { padding: 0; }
+.conversation-library-body { display: grid; grid-template-columns: minmax(250px, 34%) 1fr; min-height: 0; flex: 1; }
+.conversation-sidebar { display: flex; flex-direction: column; min-width: 0; padding: 16px; border-right: 1px solid rgba(255,255,255,.09); }
+.conversation-search { width: 100%; border: 1px solid rgba(255,255,255,.12); border-radius: 11px; outline: 0; padding: 10px 12px; color: #f6f2fb; background: rgba(255,255,255,.055); }
+.conversation-search:focus { border-color: #da79aa; }
+.conversation-items { display: flex; flex-direction: column; gap: 8px; min-height: 0; margin-top: 12px; overflow-y: auto; }
+.conversation-item { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 6px; padding: 7px; border: 1px solid transparent; border-radius: 14px; background: rgba(255,255,255,.035); }
+.conversation-item.active { border-color: rgba(218,121,170,.42); background: rgba(218,121,170,.1); }
+.conversation-select { display: grid; gap: 4px; min-width: 0; border: 0; padding: 5px; color: inherit; background: transparent; text-align: left; }
+.conversation-select strong, .conversation-select span, .conversation-select time { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-select strong { font-size: 13px; }
+.conversation-select span, .conversation-select time { color: #9c96a8; font-size: 10px; }
+.conversation-item-actions { display: flex; flex-direction: column; gap: 2px; }
+.conversation-item-actions button { width: 26px; height: 24px; border: 0; border-radius: 7px; padding: 0; color: #c9c1d6; background: transparent; }
+.conversation-item-actions button:hover { background: rgba(255,255,255,.09); }
+.conversation-library-status { padding: 9px 20px; border-top: 1px solid rgba(255,255,255,.09); color: #aaa3b5; font-size: 12px; }
+.character-profile-body { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 16px; padding: 20px 24px 24px; overflow-y: auto; }
+.character-json-field { flex: 1; min-height: 260px; }
+.character-json-field .character-json { height: 100%; }
+.character-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.character-actions button { border: 1px solid rgba(255,255,255,.13); border-radius: 11px; padding: 9px 13px; color: #fff; background: rgba(255,255,255,.08); }
+.character-actions .primary-button { border-color: rgba(226,112,167,.42); background: linear-gradient(135deg,rgba(226,112,167,.28),rgba(120,98,217,.24)); }
+.character-actions button:disabled { cursor: not-allowed; opacity: .55; }
 .history-list { display: flex; flex-direction: column; gap: 12px; padding: 20px 24px 24px; overflow-y: auto; }
+.conversation-summary { padding: 12px 14px; border: 1px solid rgba(120,98,217,.3); border-radius: 14px; color: #c9bef0; background: rgba(120,98,217,.09); }
+.conversation-summary summary { cursor: pointer; font-size: 12px; font-weight: 700; }
+.conversation-summary p { margin: 10px 0 0; color: #c7c0d3; font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
 .history-message { max-width: 86%; padding: 13px 15px; border-radius: 16px; background: rgba(255,255,255,.07); }
 .history-message.user { align-self: flex-end; background: rgba(142,108,232,.22); }
 .history-message span { color: #e995bd; font-size: 11px; font-weight: 700; }
@@ -135,7 +168,7 @@ button { cursor: pointer; }
 .history-tool-call pre { margin: 0; padding: 9px 11px; max-height: 180px; overflow: auto; border-radius: 9px; color: #d5cee8; background: rgba(0,0,0,.32); font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .field { display: grid; gap: 6px; color: #aaa3b5; font-size: 12px; }
 .field input, .field select, .field textarea { width: 100%; border: 1px solid rgba(255,255,255,.12); border-radius: 11px; outline: 0; padding: 10px 12px; color: #f6f2fb; background: rgba(255,255,255,.055); }
-.field input:focus, .field select:focus { border-color: #da79aa; }
+.field input:focus, .field select:focus, .field textarea:focus { border-color: #da79aa; }
 .field input[readonly] { cursor: not-allowed; color: #c4becd; background: rgba(255,255,255,.025); border-style: dashed; }
 .field select { color-scheme: dark; }
 .field select option { color: #f6f2fb; background: #211d2b; }
@@ -159,6 +192,8 @@ button { cursor: pointer; }
 .toggle-row { display: flex; align-items: center; gap: 9px; color: #c4becd; font-size: 13px; }
 .toggle-row input { accent-color: #db70a5; }
 .settings-actions { display: flex; align-items: center; gap: 12px; }
+.character-json { min-height: 300px; resize: vertical; font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 11.5px; line-height: 1.45; tab-size: 2; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .status-copy { color: #9c96a8; font-size: 12px; }
 .download-progress { display: grid; gap: 6px; color: #aaa3b5; font-size: 12px; }
 .download-progress progress { width: 100%; height: 7px; overflow: hidden; border: 0; border-radius: 999px; accent-color: #db70a5; }
@@ -174,6 +209,12 @@ button { cursor: pointer; }
   .history-setting button { justify-self: start; }
   .history-backdrop { padding: 12px; }
   .history-dialog { max-height: calc(100vh - 24px); }
+  .history-dialog.conversation-library { height: calc(100vh - 24px); }
+  .history-dialog.character-profile-dialog { height: calc(100vh - 24px); }
+  .history-header { align-items: flex-start; gap: 12px; }
+  .history-header-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .conversation-library-body { grid-template-columns: 1fr; grid-template-rows: minmax(180px, 42%) 1fr; }
+  .conversation-sidebar { border-right: 0; border-bottom: 1px solid rgba(255,255,255,.09); }
   .subtitle { bottom: 100px; }
   .composer { bottom: 12px; width: calc(100vw - 24px); }
   .range-grid { grid-template-columns: 1fr; }

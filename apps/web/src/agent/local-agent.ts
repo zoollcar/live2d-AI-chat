@@ -94,7 +94,29 @@ export class LocalAgentRuntime implements AgentRuntime {
     this.loadedModelId = undefined;
   }
 
-  private async getEngine(options: AgentRunOptions): Promise<Wllama> {
+  async summarize(prompt: string, settings: AgentRunOptions["settings"], signal: AbortSignal): Promise<string> {
+    const engine = await this.getEngine({
+      settings,
+      signal,
+      emit: () => undefined,
+    });
+    const stream = await engine.createChatCompletion({
+      messages: [
+        { role: "system", content: "Summarize conversation memory accurately and concisely. Return only the summary." },
+        { role: "user", content: prompt },
+      ],
+      stream: true,
+      max_tokens: 900,
+      temperature: 0.2,
+      abortSignal: signal,
+    });
+    let summary = "";
+    for await (const chunk of stream) summary += chunk.choices[0]?.delta.content ?? "";
+    if (!summary.trim()) throw new Error("The local model returned an empty conversation summary.");
+    return summary.trim();
+  }
+
+  private async getEngine(options: Pick<AgentRunOptions, "settings" | "signal" | "emit">): Promise<Wllama> {
     if (this.engine?.isModelLoaded() && this.loadedModelId === options.settings.modelId) return this.engine;
     if (this.engine) await this.dispose();
     const { Wllama, LoggerWithoutDebug } = await import("@wllama/wllama");

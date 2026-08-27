@@ -1,6 +1,5 @@
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { isStepCount, ToolLoopAgent, type ModelMessage } from "ai";
-import { normalizeBaseUrl } from "@/infrastructure/config/defaults";
+import { createRemoteLanguageModel } from "./language-model";
 import { SYSTEM_MESSAGE } from "./system-prompt";
 import { createSceneToolRegistry } from "./tools";
 import type { AgentRunOptions, AgentRuntime } from "./types";
@@ -15,18 +14,6 @@ export class RemoteAgentRuntime implements AgentRuntime {
     const { settings, scene, emit, signal } = options;
     try {
       emit({ type: "status", kind: "busy", message: "Connecting to the language model…" });
-      const upstreamUrl = normalizeBaseUrl(settings.baseUrl);
-      // In proxy mode, the browser targets the local Hono proxy and tells it
-      // which upstream to forward to via the X-LLM-Base-URL header. The proxy
-      // rejects any URL that is not on its allow list, so the upstream is
-      // chosen by the proxy, not by the user.
-      const viaProxy = settings.transport === "proxy";
-      const provider = createOpenAICompatible({
-        name: "live2d-chat",
-        baseURL: viaProxy ? "/api/llm/v1" : upstreamUrl,
-        apiKey: settings.apiKey || "not-required",
-        headers: viaProxy ? { "X-LLM-Base-URL": upstreamUrl } : undefined,
-      });
       const { aiTools, resetBatch } = createSceneToolRegistry(scene, emit);
       // The AI SDK 7+ no longer allows system messages inside `messages` —
       // they have to travel through the agent's `instructions` option or the
@@ -39,7 +26,7 @@ export class RemoteAgentRuntime implements AgentRuntime {
         ? systemMessages.map((message) => message.content).join("\n\n")
         : SYSTEM_MESSAGE.content;
       const agent = new ToolLoopAgent({
-        model: provider(settings.modelId),
+        model: createRemoteLanguageModel(settings),
         tools: aiTools,
         instructions,
         stopWhen: isStepCount(MAX_STEPS),
