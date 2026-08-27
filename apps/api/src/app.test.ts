@@ -81,6 +81,66 @@ describe("Hono LLM proxy", () => {
     expect(new Headers(request?.[1]?.headers).get("authorization")).toBe("Bearer client-secret");
   });
 
+  it("stops the upstream request when the client disconnects", async () => {
+    let upstreamSignal: AbortSignal | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
+      upstreamSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        upstreamSignal?.addEventListener(
+          "abort",
+          () => reject(new DOMException("aborted", "AbortError")),
+          { once: true },
+        );
+      });
+    });
+    const client = new AbortController();
+    const request = new Request("http://localhost/api/llm/v1/models", {
+      headers: { "x-llm-base-url": "https://upstream.example/v1" },
+      signal: client.signal,
+    });
+    const responsePromise = Promise.resolve(createApp(config).request(request));
+    await vi.waitFor(() => expect(upstreamSignal).toBeDefined());
+    client.abort();
+    await responsePromise.catch(() => undefined);
+    expect(upstreamSignal?.aborted).toBe(true);
+  });
+
+  it("proxies STT multipart bodies and TTS JSON bodies to allow-listed upstreams", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ text: "hello" }))
+      .mockResolvedValueOnce(new Response(new Uint8Array([1, 2, 3]), {
+        headers: { "content-type": "audio/mpeg" },
+      }));
+    const form = new FormData();
+    form.append("file", new Blob(["audio"]), "speech.webm");
+    form.append("model", "transcribe-model");
+    const sttResponse = await createApp(config).request("/api/stt/v1/audio/transcriptions", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer speech-secret",
+        "x-stt-base-url": "https://upstream.example/v1",
+      },
+      body: form,
+    });
+    expect(await sttResponse.json()).toEqual({ text: "hello" });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://upstream.example/v1/audio/transcriptions");
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("content-type"))
+      .toContain("multipart/form-data; boundary=");
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("authorization"))
+      .toBe("Bearer speech-secret");
+
+    const ttsResponse = await createApp(config).request("/api/tts/v1/audio/speech", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-tts-base-url": "https://upstream.example/v1",
+      },
+      body: JSON.stringify({ model: "tts-model", voice: "alloy", input: "Hello" }),
+    });
+    expect(await ttsResponse.arrayBuffer()).toEqual(new Uint8Array([1, 2, 3]).buffer);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://upstream.example/v1/audio/speech");
+  });
+
   it("forwards the upstream model list verbatim", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({
       object: "list",

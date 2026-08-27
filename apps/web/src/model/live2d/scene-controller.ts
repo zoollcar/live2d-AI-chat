@@ -75,27 +75,8 @@ export class SceneController {
   private readonly applyPerFrame = () => {
     if (this.disposed) return;
     const coreModel = this.model.internalModel.coreModel as CubismCoreModel;
-
-    // (a) decoration: clear all known decoration params, then apply current
-    for (const decoration of Object.values(live2dCatalog.decorations)) {
-      coreModel.setParameterValueById(decoration.parameter, decoration.offValue);
-    }
-    for (const id of this.snapshotValue.decorations) {
-      const decoration = live2dCatalog.decorations[id];
-      coreModel.setParameterValueById(decoration.parameter, decoration.value);
-    }
-
-    // (b) clear persistent parameters owned by state profiles, then apply the
-    // current profile. This prevents gaze/blush values leaking across states.
-    for (const parameter of stateParameterDefaults) {
-      coreModel.setParameterValueById(parameter.id, parameter.value);
-    }
-    const state = live2dCatalog.states[this.snapshotValue.state];
-    for (const parameter of state.parameters) {
-      coreModel.setParameterValueById(parameter.id, parameter.value);
-    }
-
-    // (c) ambient blink
+    // Persistent decoration/state values are synchronized when their setters
+    // run. Only animation that genuinely changes over time belongs here.
     this.applyBlink(coreModel);
   };
 
@@ -117,6 +98,7 @@ export class SceneController {
     (this.model.internalModel as unknown as InternalModelEyeBlink).eyeBlink = undefined;
     (this.model.internalModel as unknown as InternalModelEvents).on("beforeModelUpdate", this.applyPerFrame);
     this.applyLayoutImmediately();
+    this.applyDecorations();
     void this.setState("neutral");
   }
 
@@ -139,7 +121,7 @@ export class SceneController {
     }
     const canonical = decorationIds.filter((id) => ids.includes(id));
     this.snapshotValue.decorations = [...canonical];
-    this.applyPerFrame();
+    this.applyDecorations();
     return [...canonical];
   }
 
@@ -194,7 +176,7 @@ export class SceneController {
       await this.model.expression(state.expression);
     }
     this.restoreStateLoop();
-    this.applyPerFrame();
+    this.applyStateParameters();
   }
 
   setStageLayout(id: StageLayoutId) {
@@ -321,6 +303,32 @@ export class SceneController {
 
   private discardQueuedActions(): void {
     for (const queued of this.actionQueue.splice(0)) queued.resolve();
+  }
+
+  private applyDecorations(): void {
+    if (this.disposed) return;
+    const coreModel = this.model.internalModel.coreModel as CubismCoreModel;
+    for (const decoration of Object.values(live2dCatalog.decorations)) {
+      coreModel.setParameterValueById(decoration.parameter, decoration.offValue);
+    }
+    for (const id of this.snapshotValue.decorations) {
+      const decoration = live2dCatalog.decorations[id];
+      coreModel.setParameterValueById(decoration.parameter, decoration.value);
+    }
+  }
+
+  private applyStateParameters(): void {
+    if (this.disposed) return;
+    const coreModel = this.model.internalModel.coreModel as CubismCoreModel;
+    // Reset every parameter owned by a state before applying the new profile,
+    // so gaze and blush values cannot leak from the previous state.
+    for (const parameter of stateParameterDefaults) {
+      coreModel.setParameterValueById(parameter.id, parameter.value);
+    }
+    const state = live2dCatalog.states[this.snapshotValue.state];
+    for (const parameter of state.parameters) {
+      coreModel.setParameterValueById(parameter.id, parameter.value);
+    }
   }
 
   private applyBlink(coreModel: CubismCoreModel): void {

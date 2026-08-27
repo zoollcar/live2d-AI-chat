@@ -2,7 +2,7 @@ import { apiError } from "@live2d-chat/shared";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { ProxyConfig } from "./config";
-import { proxyChat, proxyModels } from "./proxy";
+import { proxyChat, proxyModels, proxySpeechToText, proxyTextToSpeech } from "./proxy";
 
 export function createApp(config: ProxyConfig) {
   const app = new Hono();
@@ -12,7 +12,13 @@ export function createApp(config: ProxyConfig) {
     "/api/*",
     cors({
       origin: (origin) => (allowedOrigins.has(origin) ? origin : ""),
-      allowHeaders: ["authorization", "content-type", "x-llm-base-url"],
+      allowHeaders: [
+        "authorization",
+        "content-type",
+        "x-llm-base-url",
+        "x-stt-base-url",
+        "x-tts-base-url",
+      ],
       allowMethods: ["GET", "POST", "OPTIONS"],
     }),
   );
@@ -33,6 +39,16 @@ export function createApp(config: ProxyConfig) {
   app.post("/api/llm/v1/chat/completions", (c) => proxyChat(c, config));
   app.all("/api/llm/*", (c) =>
     c.json(apiError("not_found", "Only upstreams, models, and chat completions are proxied."), 404),
+  );
+
+  app.post("/api/stt/v1/audio/transcriptions", (c) => proxySpeechToText(c, config));
+  app.all("/api/stt/*", (c) =>
+    c.json(apiError("not_found", "Only audio transcriptions are proxied."), 404),
+  );
+
+  app.post("/api/tts/v1/audio/speech", (c) => proxyTextToSpeech(c, config));
+  app.all("/api/tts/*", (c) =>
+    c.json(apiError("not_found", "Only audio speech synthesis is proxied."), 404),
   );
 
   app.onError((error, c) => {

@@ -7,6 +7,8 @@ const responseHeaders = ["content-type", "cache-control", "x-request-id"] as con
 function resolveUpstreamOrError(
   c: Context,
   config: ProxyConfig,
+  headerName = "x-llm-base-url",
+  headerLabel = "X-LLM-Base-URL",
 ): { upstream: ProxyUpstream } | { response: Response } {
   if (config.upstreams.size === 0) {
     return {
@@ -16,11 +18,11 @@ function resolveUpstreamOrError(
       ),
     };
   }
-  const requested = c.req.header("x-llm-base-url");
+  const requested = c.req.header(headerName);
   if (!requested) {
     return {
       response: c.json(
-        apiError("missing_upstream", "Pass the upstream URL via the X-LLM-Base-URL header."),
+        apiError("missing_upstream", `Pass the upstream URL via the ${headerLabel} header.`),
         400,
       ),
     };
@@ -38,7 +40,9 @@ function resolveUpstreamOrError(
 }
 
 function upstreamHeaders(c: Context): Headers {
-  const headers = new Headers({ "content-type": "application/json" });
+  const headers = new Headers();
+  const contentType = c.req.header("content-type");
+  if (contentType) headers.set("content-type", contentType);
   const clientAuthorization = c.req.header("authorization");
   if (clientAuthorization) headers.set("authorization", clientAuthorization);
   return headers;
@@ -52,11 +56,14 @@ async function fetchUpstream(
   init: RequestInit,
 ): Promise<Response> {
   const timeout = AbortSignal.timeout(config.timeoutMs);
+  const signal = init.signal
+    ? AbortSignal.any([c.req.raw.signal, init.signal, timeout])
+    : AbortSignal.any([c.req.raw.signal, timeout]);
   try {
     const response = await fetch(`${upstream.baseUrl}${path}`, {
       ...init,
       headers: upstreamHeaders(c),
-      signal: timeout,
+      signal,
     });
     const headers = new Headers();
     for (const name of responseHeaders) {
@@ -100,5 +107,23 @@ export async function proxyChat(c: Context, config: ProxyConfig): Promise<Respon
   return fetchUpstream(c, config, resolved.upstream, "/chat/completions", {
     method: "POST",
     body: JSON.stringify(parsed.data),
+  });
+}
+
+export async function proxySpeechToText(c: Context, config: ProxyConfig): Promise<Response> {
+  const resolved = resolveUpstreamOrError(c, config, "x-stt-base-url", "X-Stt-Base-URL");
+  if ("response" in resolved) return resolved.response;
+  return fetchUpstream(c, config, resolved.upstream, "/audio/transcriptions", {
+    method: "POST",
+    body: await c.req.arrayBuffer(),
+  });
+}
+
+export async function proxyTextToSpeech(c: Context, config: ProxyConfig): Promise<Response> {
+  const resolved = resolveUpstreamOrError(c, config, "x-tts-base-url", "X-Tts-Base-URL");
+  if ("response" in resolved) return resolved.response;
+  return fetchUpstream(c, config, resolved.upstream, "/audio/speech", {
+    method: "POST",
+    body: await c.req.arrayBuffer(),
   });
 }

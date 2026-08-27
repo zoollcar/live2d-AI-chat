@@ -31,8 +31,10 @@ export interface LlmSettings {
 }
 
 export type SttProviderId = "web-speech" | "openai-compatible";
+export type SpeechServiceTransport = "proxy" | "direct";
 export interface SttSettings {
   provider: SttProviderId;
+  transport: SpeechServiceTransport;
   baseUrl: string;
   apiKey: string;
   rememberApiKey: boolean;
@@ -44,6 +46,7 @@ export interface SttSettings {
 export type TtsProviderId = "vits-local" | "browser-speech" | "openai-compatible" | "google-cloud";
 export interface TtsSettings {
   provider: TtsProviderId;
+  transport: SpeechServiceTransport;
   baseUrl: string;
   apiKey: string;
   rememberApiKey: boolean;

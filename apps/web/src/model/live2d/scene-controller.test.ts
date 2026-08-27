@@ -36,9 +36,8 @@ function createHarness() {
     renderer: { resize: vi.fn() },
   };
   const controller = new SceneController(app as never, model as never);
-  // The constructor calls the neutral state motion and writes persistent
-  // and writes decoration/state per-frame params. Clear so each test starts
-  // from a clean mock call history.
+  // The constructor synchronizes the initial decorations and neutral state.
+  // Clear those writes so each test starts from a clean mock call history.
   model.motion.mockClear();
   coreModel.setParameterValueById.mockClear();
   return { controller, coreModel, expressionManager, listeners, model };
@@ -60,14 +59,18 @@ describe("SceneController visual state", () => {
     expect(controller.snapshot().state).toBe("neutral");
   });
 
-  it("applies combined decorations after model updates", () => {
+  it("applies decorations only when the selection changes", () => {
     const { controller, coreModel, listeners } = createHarness();
     controller.setDecorations(["crown", "cat-ears"]);
-    coreModel.setParameterValueById.mockClear();
-    listeners.get("beforeModelUpdate")?.();
     expect(coreModel.setParameterValueById).toHaveBeenCalledWith("Param53", 1);
     expect(coreModel.setParameterValueById).toHaveBeenCalledWith("Param40", 0);
     expect(coreModel.setParameterValueById).toHaveBeenCalledWith("Param51", 0);
+    coreModel.setParameterValueById.mockClear();
+    listeners.get("beforeModelUpdate")?.();
+    const persistentCalls = coreModel.setParameterValueById.mock.calls.filter(
+      ([id]) => id !== "ParamEyeLOpen" && id !== "ParamEyeROpen",
+    );
+    expect(persistentCalls).toHaveLength(0);
     expect(controller.snapshot().decorations).toEqual(["cat-ears", "crown"]);
   });
 
@@ -133,7 +136,7 @@ describe("SceneController visual state", () => {
     expect(controller.snapshot().action).toBeUndefined();
   });
 
-  it("sleeping state keeps both eyes closed every frame", () => {
+  it("closes both eyes when entering the sleeping state", () => {
     const { controller, coreModel, listeners } = createHarness();
     coreModel.setParameterValueById.mockClear();
     void controller.setState("sleeping");

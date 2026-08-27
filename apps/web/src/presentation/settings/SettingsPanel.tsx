@@ -644,6 +644,12 @@ export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }:
           </Field>
           {settings.stt.provider === "openai-compatible" && (
             <>
+              <Field label="Transport">
+                <select value={settings.stt.transport} onChange={(event) => updateStt({ transport: event.target.value as SttSettings["transport"] })}>
+                  <option value="proxy">Built-in proxy</option>
+                  <option value="direct">Direct from browser</option>
+                </select>
+              </Field>
               <Field label="API URL"><input value={settings.stt.baseUrl} onChange={(event) => updateStt({ baseUrl: event.target.value })} /></Field>
               <ModelChoiceField label="Model" value={settings.stt.modelId} options={sttModels} searchUrl={modelWebSearch} onChange={(modelId) => updateStt({ modelId })} />
               <SecretField value={settings.stt.apiKey} remember={settings.stt.rememberApiKey} onChange={(apiKey) => updateStt({ apiKey })} onRemember={(rememberApiKey) => updateStt({ rememberApiKey })} />
@@ -672,6 +678,12 @@ export function SettingsPanel({ open, messages, onClose, onTestStt, onTestTts }:
           </Field>
           {settings.tts.provider === "openai-compatible" && (
             <>
+              <Field label="Transport">
+                <select value={settings.tts.transport} onChange={(event) => updateTts({ transport: event.target.value as TtsSettings["transport"] })}>
+                  <option value="proxy">Built-in proxy</option>
+                  <option value="direct">Direct from browser</option>
+                </select>
+              </Field>
               <Field label="API URL"><input value={settings.tts.baseUrl} onChange={(event) => updateTts({ baseUrl: event.target.value })} /></Field>
               <ModelChoiceField label="Model" value={settings.tts.modelId} options={ttsModels} searchUrl={modelWebSearch} onChange={(modelId) => updateTts({ modelId })} />
               <SecretField value={settings.tts.apiKey} remember={settings.tts.rememberApiKey} onChange={(apiKey) => updateTts({ apiKey })} onRemember={(rememberApiKey) => updateTts({ rememberApiKey })} />

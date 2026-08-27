@@ -11,6 +11,7 @@ export const defaultSettings: AppSettings = {
   },
   stt: {
     provider: "web-speech",
+    transport: "direct",
     baseUrl: "https://api.openai.com/v1",
     apiKey: "",
     rememberApiKey: false,
@@ -20,6 +21,7 @@ export const defaultSettings: AppSettings = {
   },
   tts: {
     provider: "vits-local",
+    transport: "direct",
     baseUrl: "https://api.openai.com/v1",
     apiKey: "",
     rememberApiKey: false,

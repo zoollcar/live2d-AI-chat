@@ -92,10 +92,17 @@ export class OpenAiSpeechRecognitionProvider implements SpeechRecognitionProvide
       form.append("file", audio, "speech.webm");
       form.append("model", this.settings.modelId);
       form.append("language", this.settings.language.split("-")[0] || "en");
-      const url = `${normalizeBaseUrl(this.settings.baseUrl)}/audio/transcriptions`;
+      const upstreamUrl = normalizeBaseUrl(this.settings.baseUrl);
+      const viaProxy = this.settings.transport === "proxy";
+      const url = viaProxy
+        ? "/api/stt/v1/audio/transcriptions"
+        : `${upstreamUrl}/audio/transcriptions`;
       const response = await fetch(url, {
         method: "POST",
-        headers: this.settings.apiKey ? { authorization: `Bearer ${this.settings.apiKey}` } : undefined,
+        headers: {
+          ...(this.settings.apiKey ? { authorization: `Bearer ${this.settings.apiKey}` } : {}),
+          ...(viaProxy ? { "X-Stt-Base-URL": upstreamUrl } : {}),
+        },
         body: form,
         signal: controller.signal,
       });

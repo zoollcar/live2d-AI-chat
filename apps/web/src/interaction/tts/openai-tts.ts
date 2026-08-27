@@ -15,15 +15,21 @@ export class OpenAiSpeechSynthesisProvider implements SpeechSynthesisProvider {
   }
 
   async synthesize(text: string, settings: TtsSettings, signal: AbortSignal): Promise<SpeechOutput> {
-    const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/audio/speech`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(settings.apiKey ? { authorization: `Bearer ${settings.apiKey}` } : {}),
+    const upstreamUrl = normalizeBaseUrl(settings.baseUrl);
+    const viaProxy = settings.transport === "proxy";
+    const response = await fetch(
+      viaProxy ? "/api/tts/v1/audio/speech" : `${upstreamUrl}/audio/speech`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(settings.apiKey ? { authorization: `Bearer ${settings.apiKey}` } : {}),
+          ...(viaProxy ? { "X-Tts-Base-URL": upstreamUrl } : {}),
+        },
+        body: JSON.stringify({ model: settings.modelId, voice: settings.voice, input: text }),
+        signal,
       },
-      body: JSON.stringify({ model: settings.modelId, voice: settings.voice, input: text }),
-      signal,
-    });
+    );
     if (!response.ok) throw new Error(`Speech synthesis failed (${response.status}).`);
     return { kind: "audio", blob: await response.blob() };
   }
