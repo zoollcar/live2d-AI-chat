@@ -33,6 +33,7 @@ interface ConversationStore {
   hydrate(seed: NewConversationInput): Promise<void>;
   create(input: NewConversationInput): Promise<Conversation>;
   select(id: string): Promise<void>;
+  updateActiveModelSnapshot(modelSnapshot: ConversationModelSnapshot): void;
   updateMessages(updater: (messages: ChatMessage[]) => ChatMessage[]): void;
   applyCompaction(plan: ConversationCompactionPlan, summary: string): Promise<boolean>;
   flushActive(): Promise<void>;
@@ -128,6 +129,28 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
     } catch (error) {
       set({ storageError: error instanceof Error ? error.message : "Unable to remember the active conversation." });
     }
+  },
+  updateActiveModelSnapshot(modelSnapshot) {
+    const activeId = get().activeConversationId;
+    if (!activeId) return;
+    let snapshot: Conversation | undefined;
+    set((state) => ({
+      conversations: state.conversations.map((conversation) => {
+        if (conversation.id !== activeId) return conversation;
+        if (conversation.modelSnapshot.transport === modelSnapshot.transport
+          && conversation.modelSnapshot.baseUrl === modelSnapshot.baseUrl
+          && conversation.modelSnapshot.modelId === modelSnapshot.modelId) {
+          return conversation;
+        }
+        snapshot = conversationSchema.parse({
+          ...conversation,
+          modelSnapshot,
+          updatedAt: Date.now(),
+        });
+        return snapshot;
+      }),
+    }));
+    if (snapshot) scheduleSave(snapshot);
   },
   updateMessages(updater) {
     const activeId = get().activeConversationId;

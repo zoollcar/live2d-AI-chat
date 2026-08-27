@@ -6,6 +6,11 @@ import type {
 import { createSceneToolRegistry } from "./tools";
 import type { AgentRunOptions, AgentRuntime } from "./types";
 import { downloadLocalModel, getLocalModelConfig } from "./local-models";
+import {
+  hasContextForNextLocalStep,
+  LOCAL_CONTEXT_TOKENS,
+  LOCAL_MAX_OUTPUT_TOKENS,
+} from "./local-context";
 
 // Upper bound on ReAct steps for a single user turn. Matches the remote
 // runtime so the user sees "step N of M" with the same scale regardless of
@@ -37,17 +42,19 @@ export class LocalAgentRuntime implements AgentRuntime {
           tools: registry.wllamaTools as ChatCompletionTool[],
           tool_choice: "auto",
           stream: true,
-          max_tokens: 600,
+          max_tokens: LOCAL_MAX_OUTPUT_TOKENS,
           temperature: 0.7,
           abortSignal: signal,
         });
         let text = "";
         let finishReason: string | null = null;
+        let usedTokens: number | undefined;
         const calls = new Map<number, { id: string; name: string; arguments: string }>();
         for await (const chunk of stream) {
           const choice = chunk.choices[0];
           if (!choice) continue;
           finishReason = choice.finish_reason ?? finishReason;
+          usedTokens = chunk.usage?.total_tokens ?? usedTokens;
           if (choice.delta.content) {
             text += choice.delta.content;
             emit({ type: "text-delta", delta: choice.delta.content });
@@ -71,15 +78,21 @@ export class LocalAgentRuntime implements AgentRuntime {
         // Reset batch tracking so the first performAction in this new
         // assistant message preempts any actions still queued from earlier.
         registry.resetBatch();
+        const toolResultMessages: ChatCompletionMessage[] = [];
         for (const call of toolCalls) {
           const input = JSON.parse(call.function.arguments || "{}");
           const output = await registry.execute(call.function.name, input);
-          messages.push({
+          toolResultMessages.push({
             role: "tool",
             tool_call_id: call.id,
             content: JSON.stringify(output),
           });
         }
+        messages.push(...toolResultMessages);
+        // A tool-only answer is valid. If another inference would leave less
+        // than one full reply budget, keep the completed actions and finish
+        // cleanly instead of starting a request that cannot fit in context.
+        if (!hasContextForNextLocalStep(usedTokens, toolResultMessages)) break;
       }
       emit({ type: "done" });
     } catch (error) {
@@ -141,6 +154,7 @@ export class LocalAgentRuntime implements AgentRuntime {
       {
         signal: options.signal,
         useCache: true,
+        n_ctx: LOCAL_CONTEXT_TOKENS,
         progressCallback: ({ loaded, total }) => {
           const progress = total ? loaded / total : 0;
           options.emit({

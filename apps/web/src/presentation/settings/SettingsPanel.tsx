@@ -1,5 +1,5 @@
 import type { LlmSettings, SttSettings, TtsSettings } from "@live2d-chat/shared";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   downloadLocalModel,
   getLocalModelPartialProgress,
@@ -13,6 +13,7 @@ import { useConversationStore } from "@/infrastructure/conversation/store";
 import { fetchGoogleCloudVoices, type GoogleCloudVoice } from "@/interaction/tts/google-cloud-tts";
 import { downloadVitsVoice, getVitsVoicePartialProgress, isVitsVoiceDownloaded } from "@/interaction/tts/model-download";
 import type { CharacterProfile } from "@/model/character-profile";
+import { createModelSnapshot } from "@/model/conversation";
 import { CharacterProfileEditor } from "./CharacterProfileEditor";
 import { ConversationLibrary } from "./ConversationLibrary";
 
@@ -185,6 +186,18 @@ export function SettingsPanel({
   const llmAbortRef = useRef<AbortController | undefined>(undefined);
   const voiceAbortRef = useRef<AbortController | undefined>(undefined);
 
+  const updateActiveConversationLlm = useCallback((patch: Partial<LlmSettings>) => {
+    updateLlm(patch);
+    const next = useSettingsStore.getState().settings.llm;
+    useConversationStore.getState().updateActiveModelSnapshot(createModelSnapshot(next));
+  }, [updateLlm]);
+
+  const resetSettings = useCallback(() => {
+    reset();
+    const next = useSettingsStore.getState().settings.llm;
+    useConversationStore.getState().updateActiveModelSnapshot(createModelSnapshot(next));
+  }, [reset]);
+
   const llmOptions = useMemo(() => {
     if (settings.llm.transport === "local") {
       return localModelPresets.map((model) => ({
@@ -304,11 +317,11 @@ export function SettingsPanel({
     if (providers.length === 0) return;
     if (findLlmProvider(providers, settings.llm.baseUrl)) return;
     const fallback = providers[0];
-    updateLlm({
+    updateActiveConversationLlm({
       baseUrl: fallback.baseUrl,
       modelId: fallback.models[0]?.value ?? settings.llm.modelId,
     });
-  }, [open, proxyProviders, settings.llm.baseUrl, settings.llm.modelId, settings.llm.transport, updateLlm]);
+  }, [open, proxyProviders, settings.llm.baseUrl, settings.llm.modelId, settings.llm.transport, updateActiveConversationLlm]);
 
   useEffect(() => {
     if (!open || settings.tts.provider !== "browser-speech" || !("speechSynthesis" in window)) return;
@@ -536,7 +549,7 @@ export function SettingsPanel({
                 nextBaseUrl = defaultDirectProviders[0].baseUrl;
                 nextModelId = defaultDirectProviders[0].models[0]?.value ?? "";
               }
-              updateLlm({
+              updateActiveConversationLlm({
                 transport,
                 baseUrl: nextBaseUrl,
                 modelId: nextModelId,
@@ -572,7 +585,7 @@ export function SettingsPanel({
                       if (event.target.value === customValue) return;
                       const provider = providers.find((item) => item.id === event.target.value);
                       if (!provider) return;
-                      updateLlm({
+                      updateActiveConversationLlm({
                         baseUrl: provider.baseUrl,
                         modelId: provider.models[0]?.value ?? "",
                       });
@@ -590,13 +603,13 @@ export function SettingsPanel({
                 <Field label="API URL">
                   <input
                     value={settings.llm.baseUrl}
-                    onChange={(event) => updateLlm({ baseUrl: event.target.value })}
+                    onChange={(event) => updateActiveConversationLlm({ baseUrl: event.target.value })}
                     readOnly={viaProxy}
                     aria-readonly={viaProxy || undefined}
                     title={viaProxy ? "The URL is locked to the proxy's upstream whitelist." : undefined}
                   />
                 </Field>
-                <SecretField value={settings.llm.apiKey} remember={settings.llm.rememberApiKey} onChange={(apiKey) => updateLlm({ apiKey })} onRemember={(rememberApiKey) => updateLlm({ rememberApiKey })} />
+                <SecretField value={settings.llm.apiKey} remember={settings.llm.rememberApiKey} onChange={(apiKey) => updateActiveConversationLlm({ apiKey })} onRemember={(rememberApiKey) => updateActiveConversationLlm({ rememberApiKey })} />
               </>
             );
           })()}
@@ -606,7 +619,7 @@ export function SettingsPanel({
             options={llmOptions}
             downloaded={settings.llm.transport === "local" ? localDownloaded : undefined}
             searchUrl={(query) => settings.llm.transport === "local" ? huggingFaceSearch(query) : modelWebSearch(query)}
-            onChange={(modelId) => updateLlm({ modelId })}
+            onChange={(modelId) => updateActiveConversationLlm({ modelId })}
             onFetchModels={settings.llm.transport !== "local" ? () => void fetchRemoteModels() : undefined}
             fetching={discoverState.status === "loading"}
             fetchError={discoverState.status === "error" ? discoverState.message : undefined}
@@ -744,7 +757,7 @@ export function SettingsPanel({
 
         <section className="settings-section compact">
           <label className="toggle-row"><input type="checkbox" checked={settings.subtitlesEnabled} onChange={(event) => setSubtitlesEnabled(event.target.checked)} />Show subtitles</label>
-          <button className="danger-button" onClick={reset}>Restore defaults</button>
+          <button className="danger-button" onClick={resetSettings}>Restore defaults</button>
         </section>
       </aside>
 
