@@ -52,7 +52,7 @@ const chatMessageSchema: z.ZodType<ChatMessage> = z.object({
 }).passthrough();
 
 export const conversationModelSnapshotSchema: z.ZodType<ConversationModelSnapshot> = z.object({
-  transport: z.enum(["proxy", "direct", "local"]),
+  transport: z.enum(["proxy", "direct", "local", "chrome"]),
   baseUrl: z.string().trim().max(2_000),
   modelId: z.string().trim().min(1).max(500),
 }).strict();

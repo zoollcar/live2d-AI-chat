@@ -14,6 +14,20 @@ const modelSnapshot = {
 };
 
 describe("conversation persistence", () => {
+  it("accepts Chrome built-in AI model snapshots", () => {
+    const conversation = createConversation({
+      characterId: "ai-secretary",
+      modelSnapshot: {
+        transport: "chrome",
+        baseUrl: "chrome://built-in-ai",
+        modelId: "gemini-nano",
+      },
+      messages: [{ role: "user", content: "Hello" }],
+      now: 1,
+    });
+    expect(conversation.modelSnapshot.transport).toBe("chrome");
+  });
+
   it("round-trips reasoning and tool calls without credentials", () => {
     const conversation = createConversation({
       characterId: "ai-secretary",

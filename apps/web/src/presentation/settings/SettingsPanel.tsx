@@ -6,6 +6,12 @@ import {
   isLocalModelDownloaded,
   localModelPresets,
 } from "@/agent/local-models";
+import { CHROME_MODEL_ID, CHROME_MODEL_URL } from "@/agent/chrome-agent";
+import {
+  getChromePromptApiAvailability,
+  isChromePromptApiSupported,
+  type ChromePromptApiAvailability,
+} from "@/agent/chrome-prompt-api";
 import { normalizeBaseUrl } from "@/infrastructure/config/defaults";
 import { useSettingsStore } from "@/infrastructure/config/store";
 import { useCharacterStore } from "@/infrastructure/character/store";
@@ -183,6 +189,7 @@ export function SettingsPanel({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [charactersOpen, setCharactersOpen] = useState(false);
   const [proxyProviders, setProxyProviders] = useState<LlmProvider[]>(defaultProxyProviders);
+  const [chromeAvailability, setChromeAvailability] = useState<ChromePromptApiAvailability>("unsupported");
   const llmAbortRef = useRef<AbortController | undefined>(undefined);
   const voiceAbortRef = useRef<AbortController | undefined>(undefined);
 
@@ -199,6 +206,9 @@ export function SettingsPanel({
   }, [reset]);
 
   const llmOptions = useMemo(() => {
+    if (settings.llm.transport === "chrome") {
+      return [{ label: "Gemini Nano · Managed by Chrome", value: CHROME_MODEL_ID }];
+    }
     if (settings.llm.transport === "local") {
       return localModelPresets.map((model) => ({
         label: `${model.label} · ${model.size}`,
@@ -219,6 +229,15 @@ export function SettingsPanel({
     }
     return presets.map((preset) => ({ label: preset.label, value: preset.value }));
   }, [discoverState, proxyProviders, settings.llm.baseUrl, settings.llm.transport]);
+
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    void getChromePromptApiAvailability().then((availability) => {
+      if (active) setChromeAvailability(availability);
+    });
+    return () => { active = false; };
+  }, [open]);
 
   const currentVoices = localVoices[settings.tts.language] || localVoices["en-US"];
   const filteredBrowserVoices = useMemo(() => {
@@ -372,6 +391,34 @@ export function SettingsPanel({
   if (!open) return null;
 
   const testConnection = async () => {
+    if (settings.llm.transport === "chrome") {
+      if (typeof LanguageModel === "undefined" || !isChromePromptApiSupported(chromeAvailability)) {
+        setConnectionStatus("Chrome's built-in Prompt API is not available on this browser or device.");
+        return;
+      }
+      setConnectionStatus(chromeAvailability === "available"
+        ? "Starting Chrome built-in AI…"
+        : "Preparing the Chrome built-in AI download…");
+      let session: LanguageModel | undefined;
+      try {
+        session = await LanguageModel.create({
+          monitor(monitor) {
+            monitor.addEventListener("downloadprogress", (event) => {
+              setConnectionStatus(`Downloading Chrome built-in AI… ${Math.round(event.loaded * 100)}%`);
+            });
+          },
+        });
+        const response = await session.prompt("Reply with OK.");
+        if (!response.trim()) throw new Error("The model returned an empty response.");
+        setChromeAvailability("available");
+        setConnectionStatus("Test passed: Chrome built-in AI responded on this device.");
+      } catch (error) {
+        setConnectionStatus(`Chrome built-in AI failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+      } finally {
+        session?.destroy();
+      }
+      return;
+    }
     if (settings.llm.transport === "local") {
       setConnectionStatus("Checking model files…");
       try {
@@ -530,9 +577,12 @@ export function SettingsPanel({
               // has a matching preset to show.
               let nextBaseUrl = settings.llm.baseUrl;
               let nextModelId = settings.llm.modelId;
-              if (transport === "local") {
+              if (transport === "chrome") {
+                nextBaseUrl = CHROME_MODEL_URL;
+                nextModelId = CHROME_MODEL_ID;
+              } else if (transport === "local") {
                 nextModelId = localModelPresets[0].id;
-              } else if (settings.llm.transport === "local") {
+              } else if (settings.llm.transport === "local" || settings.llm.transport === "chrome") {
                 if (transport === "proxy") {
                   nextBaseUrl = proxyProviders[0]?.baseUrl ?? defaultDirectProviders[0].baseUrl;
                   nextModelId = proxyProviders[0]?.models[0]?.value
@@ -563,9 +613,14 @@ export function SettingsPanel({
               <option value="proxy">Built-in Hono proxy</option>
               <option value="direct">Direct OpenAI-compatible API</option>
               <option value="local">Local wllama in the browser</option>
+              {(isChromePromptApiSupported(chromeAvailability) || settings.llm.transport === "chrome") && (
+                <option value="chrome" disabled={!isChromePromptApiSupported(chromeAvailability)}>
+                  Chrome built-in AI (Gemini Nano)
+                </option>
+              )}
             </select>
           </Field>
-          {settings.llm.transport !== "local" && (() => {
+          {(settings.llm.transport === "proxy" || settings.llm.transport === "direct") && (() => {
             const viaProxy = settings.llm.transport === "proxy";
             const providers = viaProxy ? proxyProviders : defaultDirectProviders;
             const allowCustom = !viaProxy;
@@ -618,9 +673,15 @@ export function SettingsPanel({
             value={settings.llm.modelId}
             options={llmOptions}
             downloaded={settings.llm.transport === "local" ? localDownloaded : undefined}
-            searchUrl={(query) => settings.llm.transport === "local" ? huggingFaceSearch(query) : modelWebSearch(query)}
+            searchUrl={(query) => settings.llm.transport === "local"
+              ? huggingFaceSearch(query)
+              : settings.llm.transport === "chrome"
+                ? "https://developer.chrome.com/docs/ai/prompt-api"
+                : modelWebSearch(query)}
             onChange={(modelId) => updateActiveConversationLlm({ modelId })}
-            onFetchModels={settings.llm.transport !== "local" ? () => void fetchRemoteModels() : undefined}
+            onFetchModels={settings.llm.transport === "proxy" || settings.llm.transport === "direct"
+              ? () => void fetchRemoteModels()
+              : undefined}
             fetching={discoverState.status === "loading"}
             fetchError={discoverState.status === "error" ? discoverState.message : undefined}
           />

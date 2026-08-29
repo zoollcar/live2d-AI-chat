@@ -1,6 +1,7 @@
 import { generateText } from "ai";
 import type { LlmSettings } from "@live2d-chat/shared";
 import { buildSummaryPrompt, type ConversationCompactionPlan } from "@/model/conversation-compaction";
+import { summarizeWithChromePromptApi } from "./chrome-agent";
 import { summarizeWithLocalModel } from "./index";
 import { createRemoteLanguageModel } from "./language-model";
 
@@ -12,6 +13,9 @@ export async function summarizeConversation(
   const prompt = buildSummaryPrompt(plan);
   if (settings.transport === "local") {
     return summarizeWithLocalModel(prompt, settings, signal);
+  }
+  if (settings.transport === "chrome") {
+    return summarizeWithChromePromptApi(prompt, signal);
   }
   const result = await generateText({
     model: createRemoteLanguageModel(settings),

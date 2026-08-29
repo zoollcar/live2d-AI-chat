@@ -20,7 +20,7 @@ export const apiErrorSchema = z.object({
 
 export type ApiError = z.infer<typeof apiErrorSchema>;
 
-export type LlmTransport = "proxy" | "direct" | "local";
+export type LlmTransport = "proxy" | "direct" | "local" | "chrome";
 
 export interface LlmSettings {
   transport: LlmTransport;
