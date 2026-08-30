@@ -6,6 +6,7 @@ export {
   type GoogleLiveErrorCode,
 } from "./errors";
 export { GoogleLiveSession } from "./google-live-session";
+export { fetchGoogleRealtimeModels, type GoogleRealtimeModel } from "./google-catalog";
 export {
   Pcm16InputChunker,
   REALTIME_CHUNK_DURATION_MS,

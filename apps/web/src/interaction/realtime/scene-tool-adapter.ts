@@ -56,7 +56,11 @@ export function createGoogleLiveSceneToolAdapter(
     declarations: registry.wllamaTools.map(({ function: declaration }) => ({
       name: declaration.name,
       description: declaration.description,
-      parameters: declaration.parameters,
+      // The shared registry uses full JSON Schema. Gemini's `parameters`
+      // field accepts only its smaller OpenAPI Schema subset, while
+      // `parametersJsonSchema` accepts constraints such as
+      // additionalProperties and uniqueItems.
+      parametersJsonSchema: declaration.parameters,
     })),
     execute: (id, name, args) => new Promise((resolve, reject) => {
       queue.push({ id, name, args, cancelled: false, resolve, reject });

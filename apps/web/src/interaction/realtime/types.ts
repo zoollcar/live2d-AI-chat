@@ -17,7 +17,7 @@ export interface GoogleLiveHistoryMessage {
 export interface GoogleLiveFunctionDeclaration {
   name: string;
   description?: string;
-  parameters?: Record<string, unknown>;
+  parametersJsonSchema?: Record<string, unknown>;
 }
 
 export interface GoogleLiveToolAdapter {

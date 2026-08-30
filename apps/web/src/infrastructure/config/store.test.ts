@@ -54,7 +54,7 @@ describe("settings route persistence", () => {
       realtime: {
         provider: "google",
         google: {
-          modelId: "gemini-3.1-flash-live-preview",
+          modelId: "legacy-realtime-model",
           voiceName: "Aoede",
           apiKey: "",
           rememberApiKey: false,
@@ -104,7 +104,7 @@ describe("settings route persistence", () => {
     expect(migrated.settings?.realtime).toEqual({
       provider: "google",
       google: {
-        modelId: "gemini-3.1-flash-live-preview",
+        modelId: "obsolete-live-model",
         voiceName: "Aoede",
         apiKey: "",
         rememberApiKey: true,
@@ -116,7 +116,7 @@ describe("settings route persistence", () => {
     const store = useSettingsStore.getState();
     store.updateLlm({ modelId: "classic-model" });
     store.updateTts({ voice: "classic-voice" });
-    store.updateRealtime({ voiceName: "Aoede", modelId: "unsupported-model" });
+    store.updateRealtime({ voiceName: "Aoede", modelId: "discovered-live-model" });
 
     store.setVoiceRoute("realtime");
     store.setVoiceRoute("classic");
@@ -128,10 +128,16 @@ describe("settings route persistence", () => {
       realtime: {
         google: {
           voiceName: "Aoede",
-          modelId: "gemini-3.1-flash-live-preview",
+          modelId: "discovered-live-model",
         },
       },
     });
+  });
+
+  it("keeps the Realtime provider as an explicit selectable setting", () => {
+    useSettingsStore.getState().setRealtimeProvider("google");
+
+    expect(useSettingsStore.getState().settings.realtime.provider).toBe("google");
   });
 
   it("keeps the deprecated STT continuous flag synchronized with hands-free", () => {

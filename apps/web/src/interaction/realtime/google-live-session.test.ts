@@ -231,7 +231,7 @@ describe("GoogleLiveSession", () => {
     }));
     const cancel = vi.fn();
     const toolAdapter: GoogleLiveToolAdapter = {
-      declarations: [{ name: "setState", parameters: { type: "object" } }],
+      declarations: [{ name: "setState", parametersJsonSchema: { type: "object" } }],
       execute,
       cancel,
     };

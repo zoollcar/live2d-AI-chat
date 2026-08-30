@@ -301,7 +301,7 @@ export function useGoogleRealtime(options: UseGoogleRealtimeOptions): GoogleReal
     if (generation !== generationRef.current) return;
     const current = optionsRef.current;
     if (event.type === "status") {
-      if (event.status === "connecting") current.callbacks.setStatus("busy", "Connecting to Google Gemini Live");
+      if (event.status === "connecting") current.callbacks.setStatus("busy", "Connecting to Realtime provider");
       else if (event.status === "reconnecting") {
         current.callbacks.setStatus("busy", `Realtime reconnecting in ${event.retryInMs ?? 0} ms`);
       } else if (event.status === "ready") {
@@ -551,9 +551,9 @@ export function useGoogleRealtime(options: UseGoogleRealtimeOptions): GoogleReal
     if (!current.enabled) throw new Error("Realtime voice is not selected.");
     if (!current.scene || !current.conversation) throw new Error("The Live2D scene and conversation are not ready.");
     if (!current.settings.google.apiKey.trim()) {
-      current.callbacks.setStatus("error", "Add a Google Gemini API key in Realtime settings");
+      current.callbacks.setStatus("error", "Add the provider API key in Realtime settings");
       current.callbacks.openSettings();
-      throw new Error("A Google Gemini API key is required for Realtime voice.");
+      throw new Error("A provider API key is required for Realtime voice.");
     }
     if (sessionRef.current) {
       await sessionRef.current.connect();

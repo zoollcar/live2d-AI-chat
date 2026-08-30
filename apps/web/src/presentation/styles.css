@@ -175,6 +175,9 @@ button { cursor: pointer; }
 .field select { color-scheme: dark; }
 .field select option { color: #f6f2fb; background: #211d2b; }
 .field select option:checked { color: #fff; background: #765bd0; }
+.field-label-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.field-label-row a { color: #e79ac0; font-size: 11px; text-decoration: none; }
+.field-label-row a:hover { color: #fff; text-decoration: underline; }
 .secret-input-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .settings-section .secret-visibility-button {
   align-self: stretch; justify-self: stretch; min-width: 58px; padding: 0 10px;
@@ -227,12 +230,6 @@ button { cursor: pointer; }
 .settings-route-stack { display: grid; }
 .settings-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .settings-badge { display: inline-flex; align-items: center; justify-content: center; width: fit-content; padding: 4px 8px; border: 1px solid rgba(120,98,217,.42); border-radius: 999px; color: #d1c6fb; background: rgba(120,98,217,.14); font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
-.realtime-provider-card { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; padding: 14px; border: 1px solid rgba(120,98,217,.28); border-radius: 14px; background: linear-gradient(135deg,rgba(120,98,217,.12),rgba(218,121,170,.07)); }
-.realtime-provider-card span { grid-row: 1 / 3; align-self: center; color: #9f98ab; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
-.realtime-provider-card strong { color: #f5f1ff; font-size: 13px; }
-.realtime-provider-card small { color: #aaa3b5; font-size: 11px; }
-.realtime-model-row { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 8px; }
-.credential-warning { margin: 0; padding: 11px 12px; border-left: 3px solid #e6a054; border-radius: 4px 10px 10px 4px; color: #d8bd9d; background: rgba(205,126,44,.1); font-size: 11px; line-height: 1.5; }
 .toggle-detail { align-items: flex-start; padding: 4px 0; }
 .toggle-detail input { margin-top: 3px; }
 .toggle-detail span { display: grid; gap: 3px; }

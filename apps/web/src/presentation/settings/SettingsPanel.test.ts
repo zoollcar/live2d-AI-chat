@@ -79,6 +79,7 @@ describe("SettingsPanel voice routes", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     useConversationStore.setState({
       conversations: [],
       activeConversationId: undefined,
@@ -98,28 +99,71 @@ describe("SettingsPanel voice routes", () => {
     expect(markup).toContain("Speech synthesis");
     expect(markup).toContain("<details");
     expect(markup).toContain("route-settings-details");
-    expect(markup).not.toContain("Test Realtime connection");
+    expect(markup).not.toContain("Test provider connection");
     expect(markup).toContain("These controls apply to both voice pipelines");
     expect(markup.indexOf("Conversation behavior")).toBeLessThan(
       markup.indexOf("aria-label=\"Classic voice pipeline settings\""),
     );
   });
 
-  it("shows the fixed Google model, prebuilt voices, and browser-key warning for Realtime", async () => {
+  it("shows provider-neutral Realtime settings and asks for a key before loading options", async () => {
     const markup = await renderSettings("realtime");
 
-    expect(markup).toContain("gemini-3.1-flash-live-preview");
-    expect(markup).toContain("Preview");
-    expect(markup).toContain("Kore · Firm · Recommended");
-    expect(markup).toContain("Sulafat · Warm");
-    expect(markup).toContain("page scripts and browser tooling can extract it");
-    expect(markup).toContain("Test Realtime connection");
+    expect(markup).toContain("Enter an API key to load models");
+    expect(markup).toContain("Enter an API key to load voices");
+    expect(markup).not.toContain("gemini-3.1-flash-live-preview");
+    expect(markup).not.toContain("Kore · Firm · Recommended");
+    expect(markup).not.toContain("page scripts and browser tooling can extract it");
+    expect(markup).toContain("Realtime voice settings");
+    expect(markup).toContain("The selected provider handles listening");
+    expect(markup).toContain("<option value=\"google\">Google Gemini Live</option>");
+    expect(markup).toContain("href=\"https://aistudio.google.com/apikey\"");
+    expect(markup).toContain("Get a key ↗");
+    expect(markup).toContain("Test provider connection");
     expect(markup).toContain("Show API key");
     expect(markup.indexOf("Conversation behavior")).toBeLessThan(
-      markup.indexOf("aria-label=\"Google Gemini Live settings\""),
+      markup.indexOf("aria-label=\"Realtime voice settings\""),
     );
     expect(markup).not.toContain(">Speech recognition<");
     expect(markup).not.toContain(">Speech synthesis<");
+  });
+
+  it("automatically loads and selects models after a Realtime API key is entered", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).startsWith("https://generativelanguage.googleapis.com/")) {
+        return {
+          ok: true,
+          json: async () => ({
+            models: [{
+              name: "models/gemini-live-from-api",
+              displayName: "Gemini Live From API",
+              supportedGenerationMethods: ["bidiGenerateContent"],
+            }],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ upstreams: [] }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const settings = settingsFor("realtime");
+    settings.realtime.google.apiKey = "test-key";
+    useSettingsStore.setState({ settings, hydrated: true });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(createElement(SettingsPanel, settingsPanelProps)));
+    await act(async () => vi.advanceTimersByTimeAsync(400));
+
+    expect(container.innerHTML).toContain("Gemini Live From API · gemini-live-from-api");
+    expect(container.innerHTML).toContain("Kore · Firm · Recommended");
+    expect(container.innerHTML).not.toContain("Models were loaded from the Gemini API");
+    expect(useSettingsStore.getState().settings.realtime.google.modelId).toBe("gemini-live-from-api");
+
+    await act(async () => root.unmount());
+    container.remove();
+    vi.useRealTimers();
   });
 
   it("renders Classic LLM controls from the active conversation snapshot without changing the global default", async () => {

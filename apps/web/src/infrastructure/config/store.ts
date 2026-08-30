@@ -2,6 +2,7 @@ import type {
   AppSettings,
   GoogleRealtimeSettings,
   LlmSettings,
+  RealtimeProviderId,
   RealtimeSettings,
   SttSettings,
   TtsSettings,
@@ -34,6 +35,7 @@ interface SettingsStore {
   hydrated: boolean;
   hydrateSecrets(): void;
   setVoiceRoute(route: VoiceRoute): void;
+  setRealtimeProvider(provider: RealtimeProviderId): void;
   updateVoiceInteraction(patch: Partial<VoiceInteractionSettings>): void;
   updateLlm(patch: Partial<LlmSettings>): void;
   updateStt(patch: Partial<SttSettings>): void;
@@ -83,7 +85,9 @@ function normalizePersistedRealtime(saved?: LegacyRealtimeSettings): RealtimeSet
     google: {
       ...defaultSettings.realtime.google,
       ...google,
-      modelId: defaultSettings.realtime.google.modelId,
+      modelId: google.modelId
+        ?? saved?.modelId
+        ?? defaultSettings.realtime.google.modelId,
       voiceName: google.voiceName
         ?? saved?.voiceName
         ?? saved?.voice
@@ -167,6 +171,14 @@ export const useSettingsStore = create<SettingsStore>()(
       setVoiceRoute(voiceRoute) {
         set((state) => ({ settings: { ...state.settings, voiceRoute } }));
       },
+      setRealtimeProvider(provider) {
+        set((state) => ({
+          settings: {
+            ...state.settings,
+            realtime: { ...state.settings.realtime, provider },
+          },
+        }));
+      },
       updateVoiceInteraction(patch) {
         set((state) => {
           const voiceInteraction = { ...state.settings.voiceInteraction, ...patch };
@@ -214,7 +226,6 @@ export const useSettingsStore = create<SettingsStore>()(
         const google = {
           ...get().settings.realtime.google,
           ...patch,
-          modelId: defaultSettings.realtime.google.modelId,
         };
         if (patch.apiKey !== undefined || patch.rememberApiKey !== undefined) {
           writeSecret("realtime", google.apiKey, google.rememberApiKey);

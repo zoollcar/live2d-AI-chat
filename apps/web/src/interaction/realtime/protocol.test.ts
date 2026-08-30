@@ -27,7 +27,12 @@ describe("Google Live protocol", () => {
       functionDeclarations: [{
         name: "setState",
         description: "Set state",
-        parameters: { type: "object" },
+        parametersJsonSchema: {
+          type: "object",
+          properties: { state: { type: "string", enum: ["happy"] } },
+          required: ["state"],
+          additionalProperties: false,
+        },
       }],
     });
     expect(message).toEqual({
@@ -48,7 +53,12 @@ describe("Google Live protocol", () => {
         tools: [{ functionDeclarations: [{
           name: "setState",
           description: "Set state",
-          parameters: { type: "object" },
+          parametersJsonSchema: {
+            type: "object",
+            properties: { state: { type: "string", enum: ["happy"] } },
+            required: ["state"],
+            additionalProperties: false,
+          },
         }] }],
         historyConfig: { initialHistoryInClientContent: true },
       },

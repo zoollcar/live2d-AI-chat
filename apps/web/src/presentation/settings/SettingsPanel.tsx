@@ -1,4 +1,4 @@
-import type { LlmSettings, SttSettings, TtsSettings, VoiceRoute } from "@live2d-chat/shared";
+import type { LlmSettings, RealtimeProviderId, SttSettings, TtsSettings, VoiceRoute } from "@live2d-chat/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   downloadLocalModel,
@@ -16,6 +16,7 @@ import { normalizeBaseUrl } from "@/infrastructure/config/defaults";
 import { useSettingsStore } from "@/infrastructure/config/store";
 import { useCharacterStore } from "@/infrastructure/character/store";
 import { useConversationStore } from "@/infrastructure/conversation/store";
+import { fetchGoogleRealtimeModels, type GoogleRealtimeModel } from "@/interaction/realtime";
 import { fetchGoogleCloudVoices, type GoogleCloudVoice } from "@/interaction/tts/google-cloud-tts";
 import { downloadVitsVoice, getVitsVoicePartialProgress, isVitsVoiceDownloaded } from "@/interaction/tts/model-download";
 import type { CharacterProfile } from "@/model/character-profile";
@@ -53,6 +54,12 @@ type GoogleVoiceState =
   | { status: "loading"; voices: GoogleCloudVoice[] }
   | { status: "success"; voices: GoogleCloudVoice[] }
   | { status: "error"; voices: GoogleCloudVoice[]; message: string };
+
+type GoogleRealtimeCatalogState =
+  | { status: "idle"; models: GoogleRealtimeModel[] }
+  | { status: "loading"; models: GoogleRealtimeModel[] }
+  | { status: "success"; models: GoogleRealtimeModel[] }
+  | { status: "error"; models: GoogleRealtimeModel[]; message: string };
 
 interface ModelOption {
   label: string;
@@ -155,11 +162,9 @@ const ttsModels: ModelOption[] = [
   { label: "TTS 1 · Low latency", value: "tts-1" },
   { label: "TTS 1 HD · Higher quality", value: "tts-1-hd" },
 ];
-const googleRealtimeModel: ModelOption = {
-  label: "Gemini 3.1 Flash Live Preview",
-  value: "gemini-3.1-flash-live-preview",
-};
-const googleRealtimeVoices: ModelOption[] = [
+// Google documents these as the prebuilt voices accepted by Gemini Live, but
+// unlike models it does not expose a voices.list resource in the Gemini API.
+const googleOfficialRealtimeVoices: ModelOption[] = [
   { label: "Kore · Firm · Recommended", value: "Kore" },
   { label: "Zephyr · Bright", value: "Zephyr" },
   { label: "Puck · Upbeat", value: "Puck" },
@@ -216,6 +221,7 @@ export function SettingsPanel({
   const {
     settings,
     setVoiceRoute,
+    setRealtimeProvider,
     updateVoiceInteraction,
     updateLlm,
     updateStt,
@@ -237,6 +243,10 @@ export function SettingsPanel({
   const [connectionStatus, setConnectionStatus] = useState("");
   const [realtimeConnectionStatus, setRealtimeConnectionStatus] = useState("");
   const [realtimeTesting, setRealtimeTesting] = useState(false);
+  const [googleRealtimeCatalog, setGoogleRealtimeCatalog] = useState<GoogleRealtimeCatalogState>({
+    status: "idle",
+    models: [],
+  });
   const [discoverState, setDiscoverState] = useState<DiscoverState>({ status: "idle" });
   const [googleVoiceState, setGoogleVoiceState] = useState<GoogleVoiceState>({ status: "idle", voices: [] });
   const [localDownloaded, setLocalDownloaded] = useState<Record<string, boolean>>({});
@@ -293,6 +303,40 @@ export function SettingsPanel({
     }
     return presets.map((preset) => ({ label: preset.label, value: preset.value }));
   }, [discoverState, effectiveLlm.baseUrl, effectiveLlm.transport, proxyProviders]);
+
+  useEffect(() => {
+    const apiKey = settings.realtime.google.apiKey.trim();
+    if (!open || settings.voiceRoute !== "realtime" || !apiKey) {
+      setGoogleRealtimeCatalog({ status: "idle", models: [] });
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setGoogleRealtimeCatalog((current) => ({ status: "loading", models: current.models }));
+      void fetchGoogleRealtimeModels(apiKey, controller.signal)
+        .then((models) => {
+          setGoogleRealtimeCatalog({ status: "success", models });
+          const selectedModel = useSettingsStore.getState().settings.realtime.google.modelId;
+          if (models.length > 0 && !models.some((model) => model.id === selectedModel)) {
+            updateRealtime({ modelId: models[0].id });
+          }
+        })
+        .catch((error: unknown) => {
+          if (controller.signal.aborted) return;
+          setGoogleRealtimeCatalog({
+            status: "error",
+            models: [],
+            message: error instanceof Error ? error.message : "Unable to load Realtime models.",
+          });
+        });
+    }, 400);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [open, settings.realtime.google.apiKey, settings.voiceRoute, updateRealtime]);
 
   useEffect(() => {
     if (!open) return;
@@ -507,14 +551,14 @@ export function SettingsPanel({
 
   const testRealtimeConnection = async () => {
     if (!settings.realtime.google.apiKey.trim()) {
-      setRealtimeConnectionStatus("Enter a Google Gemini API key before testing Realtime voice.");
+      setRealtimeConnectionStatus("Enter the selected provider's API key before testing Realtime voice.");
       return;
     }
     setRealtimeTesting(true);
-    setRealtimeConnectionStatus("Connecting to Google Gemini Live…");
+    setRealtimeConnectionStatus("Connecting to the Realtime provider…");
     try {
       await onTestRealtime();
-      setRealtimeConnectionStatus("Test passed: Google Gemini Live is ready for realtime audio.");
+      setRealtimeConnectionStatus("Test passed: the selected provider is ready for realtime audio.");
     } catch (error) {
       setRealtimeConnectionStatus(`Realtime connection failed: ${error instanceof Error ? error.message : "Unknown error"}`);
     } finally {
@@ -642,7 +686,7 @@ export function SettingsPanel({
               route="realtime"
               checked={settings.voiceRoute === "realtime"}
               title="Realtime voice"
-              detail="Microphone ↔ Google Gemini Live native audio"
+              detail="Microphone ↔ native low-latency audio"
               onChange={selectVoiceRoute}
             />
             <VoiceRouteCard
@@ -932,26 +976,18 @@ export function SettingsPanel({
         </details>
           </div>
         ) : (
-          <section className="settings-section realtime-settings" aria-label="Google Gemini Live settings">
+          <section className="settings-section realtime-settings" aria-label="Realtime voice settings">
             <div className="settings-section-heading">
-              <h3>Google Gemini Live</h3>
+              <h3>Realtime voice</h3>
               <span className="settings-badge">Realtime</span>
             </div>
-            <p className="settings-section-copy">Google handles listening, reasoning, and native speech in one low-latency session. Classic STT and TTS are bypassed.</p>
-            <div className="realtime-provider-card">
-              <span>Provider</span>
-              <strong>Google Gemini Live</strong>
-              <small>Native bidirectional audio · tools and transcripts enabled</small>
-            </div>
-            <Field label="Model">
-              <div className="realtime-model-row">
-                <input value={googleRealtimeModel.value} readOnly />
-                <span className="settings-badge">Preview</span>
-              </div>
-            </Field>
-            <Field label="Prebuilt voice">
-              <select value={settings.realtime.google.voiceName} onChange={(event) => updateRealtime({ voiceName: event.target.value })}>
-                {googleRealtimeVoices.map((voice) => <option key={voice.value} value={voice.value}>{voice.label}</option>)}
+            <p className="settings-section-copy">The selected provider handles listening, reasoning, and native speech in one low-latency session. Classic STT and TTS are bypassed.</p>
+            <Field label="Provider">
+              <select
+                value={settings.realtime.provider}
+                onChange={(event) => setRealtimeProvider(event.target.value as RealtimeProviderId)}
+              >
+                <option value="google">Google Gemini Live</option>
               </select>
             </Field>
             <SecretField
@@ -960,11 +996,48 @@ export function SettingsPanel({
               onChange={(apiKey) => updateRealtime({ apiKey })}
               onRemember={(rememberApiKey) => updateRealtime({ rememberApiKey })}
               autoFocus={!settings.realtime.google.apiKey}
+              helpLink={{
+                href: "https://aistudio.google.com/apikey",
+                label: "Get a key ↗",
+              }}
             />
-            <p className="credential-warning" role="note">Direct browser access cannot make a long-lived API key secret: page scripts and browser tooling can extract it. Leave Remember off on shared devices and restrict the key in Google Cloud.</p>
+            <Field label="Model">
+              <select
+                value={googleRealtimeCatalog.models.some((model) => model.id === settings.realtime.google.modelId)
+                  ? settings.realtime.google.modelId
+                  : ""}
+                onChange={(event) => updateRealtime({ modelId: event.target.value })}
+                disabled={googleRealtimeCatalog.status !== "success" || googleRealtimeCatalog.models.length === 0}
+              >
+                {googleRealtimeCatalog.status === "idle" && <option value="">Enter an API key to load models</option>}
+                {googleRealtimeCatalog.status === "loading" && <option value="">Loading models…</option>}
+                {googleRealtimeCatalog.status === "error" && <option value="">Unable to load models</option>}
+                {googleRealtimeCatalog.status === "success" && googleRealtimeCatalog.models.length === 0 && <option value="">No Live API models are available for this key</option>}
+                {googleRealtimeCatalog.models.map((model) => (
+                  <option key={model.id} value={model.id}>{model.label} · {model.id}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Prebuilt voice">
+              <select
+                value={googleRealtimeCatalog.status === "success" ? settings.realtime.google.voiceName : ""}
+                onChange={(event) => updateRealtime({ voiceName: event.target.value })}
+                disabled={googleRealtimeCatalog.status !== "success"}
+              >
+                {googleRealtimeCatalog.status === "idle" && <option value="">Enter an API key to load voices</option>}
+                {googleRealtimeCatalog.status === "loading" && <option value="">Loading voices…</option>}
+                {googleRealtimeCatalog.status === "error" && <option value="">Unable to load voices</option>}
+                {googleRealtimeCatalog.status === "success" && googleOfficialRealtimeVoices.map((voice) => (
+                  <option key={voice.value} value={voice.value}>{voice.label}</option>
+                ))}
+              </select>
+            </Field>
+            {googleRealtimeCatalog.status === "error" ? (
+              <span className="status-copy" role="alert">Could not load Realtime models: {googleRealtimeCatalog.message}</span>
+            ) : null}
             <div className="settings-actions">
               <button disabled={realtimeTesting} onClick={() => void testRealtimeConnection()}>
-                {realtimeTesting ? "Testing Realtime…" : "Test Realtime connection"}
+                {realtimeTesting ? "Testing provider…" : "Test provider connection"}
               </button>
             </div>
             {realtimeConnectionStatus ? <span className="status-copy" role="status">{realtimeConnectionStatus}</span> : null}
@@ -1093,18 +1166,24 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return <label className="field"><span>{label}</span>{children}</label>;
 }
 
-function SecretField({ value, remember, onChange, onRemember, autoFocus = false }: {
+function SecretField({ value, remember, onChange, onRemember, autoFocus = false, helpLink }: {
   value: string;
   remember: boolean;
   onChange(value: string): void;
   onRemember(value: boolean): void;
   autoFocus?: boolean;
+  helpLink?: { href: string; label: string };
 }) {
   const [revealed, setRevealed] = useState(false);
   return (
     <>
       <div className="field">
-        <span>API Key</span>
+        <span className="field-label-row">
+          <span>API Key</span>
+          {helpLink ? (
+            <a href={helpLink.href} target="_blank" rel="noreferrer">{helpLink.label}</a>
+          ) : null}
+        </span>
         <div className="secret-input-row">
           <input
             aria-label="API Key"

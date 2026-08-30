@@ -25,6 +25,19 @@ describe("Google Live scene tool adapter", () => {
       "performAction",
       "setStageLayout",
     ]);
+    expect(adapter.declarations[0]).toMatchObject({
+      name: "setState",
+      parametersJsonSchema: {
+        type: "object",
+        required: ["state"],
+        additionalProperties: false,
+      },
+    });
+    expect(adapter.declarations[1]?.parametersJsonSchema).toMatchObject({
+      properties: {
+        decorations: { type: "array", uniqueItems: true },
+      },
+    });
     await expect(adapter.execute("call-1", "setStageLayout", { layout: "half-body-right" }))
       .resolves.toEqual({ ok: true, layout: "half-body-right" });
     expect(scene.setStageLayout).toHaveBeenCalledWith("half-body-right");
