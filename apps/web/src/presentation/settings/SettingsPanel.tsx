@@ -1,4 +1,4 @@
-import type { LlmSettings, SttSettings, TtsSettings } from "@live2d-chat/shared";
+import type { LlmSettings, SttSettings, TtsSettings, VoiceRoute } from "@live2d-chat/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   downloadLocalModel,
@@ -30,6 +30,7 @@ interface Props {
   onCreateConversation(): Promise<void>;
   onDeleteConversation(id: string): Promise<void>;
   onSelectConversation(id: string): Promise<void>;
+  onTestRealtime(): Promise<void>;
   onTestStt(): void;
   onTestTts(): void;
 }
@@ -136,6 +137,14 @@ function findLlmProvider(providers: LlmProvider[], baseUrl: string): LlmProvider
   const normalized = baseUrl.trim().replace(/\/+$/, "");
   return providers.find((provider) => provider.baseUrl === normalized);
 }
+
+function getCurrentLlmBaseUrl(): string {
+  const conversationState = useConversationStore.getState();
+  const activeConversation = conversationState.conversations.find((conversation) =>
+    conversation.id === conversationState.activeConversationId);
+  return activeConversation?.modelSnapshot.baseUrl ?? useSettingsStore.getState().settings.llm.baseUrl;
+}
+
 const sttModels: ModelOption[] = [
   { label: "GPT-4o mini Transcribe · Recommended", value: "gpt-4o-mini-transcribe" },
   { label: "GPT-4o Transcribe · Higher quality", value: "gpt-4o-transcribe" },
@@ -145,6 +154,42 @@ const ttsModels: ModelOption[] = [
   { label: "GPT-4o mini TTS · Recommended", value: "gpt-4o-mini-tts" },
   { label: "TTS 1 · Low latency", value: "tts-1" },
   { label: "TTS 1 HD · Higher quality", value: "tts-1-hd" },
+];
+const googleRealtimeModel: ModelOption = {
+  label: "Gemini 3.1 Flash Live Preview",
+  value: "gemini-3.1-flash-live-preview",
+};
+const googleRealtimeVoices: ModelOption[] = [
+  { label: "Kore · Firm · Recommended", value: "Kore" },
+  { label: "Zephyr · Bright", value: "Zephyr" },
+  { label: "Puck · Upbeat", value: "Puck" },
+  { label: "Charon · Informative", value: "Charon" },
+  { label: "Fenrir · Excitable", value: "Fenrir" },
+  { label: "Leda · Youthful", value: "Leda" },
+  { label: "Orus · Firm", value: "Orus" },
+  { label: "Aoede · Breezy", value: "Aoede" },
+  { label: "Callirrhoe · Easy-going", value: "Callirrhoe" },
+  { label: "Autonoe · Bright", value: "Autonoe" },
+  { label: "Enceladus · Breathy", value: "Enceladus" },
+  { label: "Iapetus · Clear", value: "Iapetus" },
+  { label: "Umbriel · Easy-going", value: "Umbriel" },
+  { label: "Algieba · Smooth", value: "Algieba" },
+  { label: "Despina · Smooth", value: "Despina" },
+  { label: "Erinome · Clear", value: "Erinome" },
+  { label: "Algenib · Gravelly", value: "Algenib" },
+  { label: "Rasalgethi · Informative", value: "Rasalgethi" },
+  { label: "Laomedeia · Upbeat", value: "Laomedeia" },
+  { label: "Achernar · Soft", value: "Achernar" },
+  { label: "Alnilam · Firm", value: "Alnilam" },
+  { label: "Schedar · Even", value: "Schedar" },
+  { label: "Gacrux · Mature", value: "Gacrux" },
+  { label: "Pulcherrima · Forward", value: "Pulcherrima" },
+  { label: "Achird · Friendly", value: "Achird" },
+  { label: "Zubenelgenubi · Casual", value: "Zubenelgenubi" },
+  { label: "Vindemiatrix · Gentle", value: "Vindemiatrix" },
+  { label: "Sadachbia · Lively", value: "Sadachbia" },
+  { label: "Sadaltager · Knowledgeable", value: "Sadaltager" },
+  { label: "Sulafat · Warm", value: "Sulafat" },
 ];
 const localVoices: Record<string, ModelOption[]> = {
   "en-US": [
@@ -164,17 +209,34 @@ export function SettingsPanel({
   onCreateConversation,
   onDeleteConversation,
   onSelectConversation,
+  onTestRealtime,
   onTestStt,
   onTestTts,
 }: Props) {
-  const { settings, updateLlm, updateStt, updateTts, setSubtitlesEnabled, reset } = useSettingsStore();
+  const {
+    settings,
+    setVoiceRoute,
+    updateVoiceInteraction,
+    updateLlm,
+    updateStt,
+    updateTts,
+    updateRealtime,
+    setSubtitlesEnabled,
+    reset,
+  } = useSettingsStore();
   const activeConversation = useConversationStore((state) =>
     state.conversations.find((conversation) => conversation.id === state.activeConversationId));
+  const effectiveLlm = useMemo<LlmSettings>(() => ({
+    ...settings.llm,
+    ...activeConversation?.modelSnapshot,
+  }), [activeConversation?.modelSnapshot, settings.llm]);
   const activeCharacter = useCharacterStore((state) =>
     state.profiles.find((profile) => profile.id === state.activeProfileId) ?? state.profiles[0]);
   const characterCount = useCharacterStore((state) => state.profiles.length);
   const visibleMessageCount = activeConversation?.messages.filter((message) => message.role !== "system").length ?? 0;
   const [connectionStatus, setConnectionStatus] = useState("");
+  const [realtimeConnectionStatus, setRealtimeConnectionStatus] = useState("");
+  const [realtimeTesting, setRealtimeTesting] = useState(false);
   const [discoverState, setDiscoverState] = useState<DiscoverState>({ status: "idle" });
   const [googleVoiceState, setGoogleVoiceState] = useState<GoogleVoiceState>({ status: "idle", voices: [] });
   const [localDownloaded, setLocalDownloaded] = useState<Record<string, boolean>>({});
@@ -194,41 +256,43 @@ export function SettingsPanel({
   const voiceAbortRef = useRef<AbortController | undefined>(undefined);
 
   const updateActiveConversationLlm = useCallback((patch: Partial<LlmSettings>) => {
-    updateLlm(patch);
-    const next = useSettingsStore.getState().settings.llm;
+    const next = { ...effectiveLlm, ...patch };
+    updateLlm(next);
     useConversationStore.getState().updateActiveModelSnapshot(createModelSnapshot(next));
-  }, [updateLlm]);
+  }, [effectiveLlm, updateLlm]);
 
   const resetSettings = useCallback(() => {
     reset();
     const next = useSettingsStore.getState().settings.llm;
     useConversationStore.getState().updateActiveModelSnapshot(createModelSnapshot(next));
+    setConnectionStatus("");
+    setRealtimeConnectionStatus("");
   }, [reset]);
 
   const llmOptions = useMemo(() => {
-    if (settings.llm.transport === "chrome") {
+    if (effectiveLlm.transport === "chrome") {
       return [{ label: "Gemini Nano · Managed by Chrome", value: CHROME_MODEL_ID }];
     }
-    if (settings.llm.transport === "local") {
+    if (effectiveLlm.transport === "local") {
       return localModelPresets.map((model) => ({
         label: `${model.label} · ${model.size}`,
         value: model.id,
       }));
     }
-    const providers = settings.llm.transport === "proxy" ? proxyProviders : defaultDirectProviders;
-    const provider = findLlmProvider(providers, settings.llm.baseUrl);
+    const providers = effectiveLlm.transport === "proxy" ? proxyProviders : defaultDirectProviders;
+    const provider = findLlmProvider(providers, effectiveLlm.baseUrl);
     // Only use provider preset models when the user hasn't already pulled a
     // fresh list from the live API for this exact baseUrl. Once they hit
     // the magnifying glass and the fetch succeeds, the dropdown reflects
     // what the server actually offers — the built-in presets are stale
     // guesses by definition.
-    const haveFreshFetch = discoverState.status === "success" && discoverState.baseUrl === settings.llm.baseUrl;
+    const haveFreshFetch = discoverState.status === "success" && discoverState.baseUrl === effectiveLlm.baseUrl;
     const presets = haveFreshFetch ? [] : (provider?.models ?? []);
     if (haveFreshFetch) {
       return discoverState.models.map((model) => ({ label: model, value: model }));
     }
     return presets.map((preset) => ({ label: preset.label, value: preset.value }));
-  }, [discoverState, proxyProviders, settings.llm.baseUrl, settings.llm.transport]);
+  }, [discoverState, effectiveLlm.baseUrl, effectiveLlm.transport, proxyProviders]);
 
   useEffect(() => {
     if (!open) return;
@@ -248,25 +312,25 @@ export function SettingsPanel({
     voice.voiceURI === settings.tts.voice || voice.name === settings.tts.voice);
 
   useEffect(() => {
-    if (!open || settings.llm.transport !== "local") return;
+    if (!open || effectiveLlm.transport !== "local") return;
     let active = true;
     void Promise.all(localModelPresets.map(async ({ id }) => [id, await isLocalModelDownloaded(id)] as const))
       .then((entries) => active && setLocalDownloaded(Object.fromEntries(entries)))
       .catch(() => undefined);
     return () => { active = false; };
-  }, [open, settings.llm.transport]);
+  }, [effectiveLlm.transport, open]);
 
   useEffect(() => {
-    if (!open || settings.llm.transport !== "local" || localDownloaded[settings.llm.modelId]) {
+    if (!open || effectiveLlm.transport !== "local" || localDownloaded[effectiveLlm.modelId]) {
       setLlmResumeProgress(0);
       return;
     }
     let active = true;
-    void getLocalModelPartialProgress(settings.llm.modelId)
+    void getLocalModelPartialProgress(effectiveLlm.modelId)
       .then((progress) => active && setLlmResumeProgress(progress))
       .catch(() => undefined);
     return () => { active = false; };
-  }, [localDownloaded, open, settings.llm.modelId, settings.llm.transport]);
+  }, [effectiveLlm.modelId, effectiveLlm.transport, localDownloaded, open]);
 
   useEffect(() => {
     if (!open || settings.tts.provider !== "vits-local") return;
@@ -322,26 +386,6 @@ export function SettingsPanel({
     return () => { active = false; };
   }, [open]);
 
-  // If the persisted `baseUrl` doesn't match any proxy provider, silently
-  // re-target the first provider so the UI display matches the runtime's
-  // actual upstream. The persist `migrate` function already does this for
-  // legacy version-2 state; this catches anything that slipped through
-  // (e.g. a user manually edited localStorage, or a server-side upstream
-  // list removed the entry they were on). Only fires in proxy mode where
-  // a custom URL isn't permitted — direct mode keeps the user's custom
-  // value intact.
-  useEffect(() => {
-    if (!open || settings.llm.transport !== "proxy") return;
-    const providers = proxyProviders;
-    if (providers.length === 0) return;
-    if (findLlmProvider(providers, settings.llm.baseUrl)) return;
-    const fallback = providers[0];
-    updateActiveConversationLlm({
-      baseUrl: fallback.baseUrl,
-      modelId: fallback.models[0]?.value ?? settings.llm.modelId,
-    });
-  }, [open, proxyProviders, settings.llm.baseUrl, settings.llm.modelId, settings.llm.transport, updateActiveConversationLlm]);
-
   useEffect(() => {
     if (!open || settings.tts.provider !== "browser-speech" || !("speechSynthesis" in window)) return;
     const updateVoices = () => setBrowserVoices([...window.speechSynthesis.getVoices()]);
@@ -391,7 +435,7 @@ export function SettingsPanel({
   if (!open) return null;
 
   const testConnection = async () => {
-    if (settings.llm.transport === "chrome") {
+    if (effectiveLlm.transport === "chrome") {
       if (typeof LanguageModel === "undefined" || !isChromePromptApiSupported(chromeAvailability)) {
         setConnectionStatus("Chrome's built-in Prompt API is not available on this browser or device.");
         return;
@@ -419,33 +463,33 @@ export function SettingsPanel({
       }
       return;
     }
-    if (settings.llm.transport === "local") {
+    if (effectiveLlm.transport === "local") {
       setConnectionStatus("Checking model files…");
       try {
-        const downloaded = await isLocalModelDownloaded(settings.llm.modelId);
-        setLocalDownloaded((current) => ({ ...current, [settings.llm.modelId]: downloaded }));
+        const downloaded = await isLocalModelDownloaded(effectiveLlm.modelId);
+        setLocalDownloaded((current) => ({ ...current, [effectiveLlm.modelId]: downloaded }));
         setConnectionStatus(downloaded ? "Test passed: the model files are complete and ready to load." : "The model has not been downloaded yet.");
       } catch (error) {
         setConnectionStatus(`Check failed: ${error instanceof Error ? error.message : "Unknown error"}`);
       }
       return;
     }
-    if (!settings.llm.modelId.trim()) {
+    if (!effectiveLlm.modelId.trim()) {
       setConnectionStatus("Enter a model ID before testing the connection.");
       return;
     }
     setConnectionStatus("Sending a test request…");
     try {
-      const viaProxy = settings.llm.transport === "proxy";
-      const baseUrl = viaProxy ? "/api/llm/v1" : normalizeBaseUrl(settings.llm.baseUrl);
+      const viaProxy = effectiveLlm.transport === "proxy";
+      const baseUrl = viaProxy ? "/api/llm/v1" : normalizeBaseUrl(effectiveLlm.baseUrl);
       const headers: Record<string, string> = { "content-type": "application/json" };
-      if (settings.llm.apiKey) headers.authorization = `Bearer ${settings.llm.apiKey}`;
-      if (viaProxy) headers["X-LLM-Base-URL"] = normalizeBaseUrl(settings.llm.baseUrl);
+      if (effectiveLlm.apiKey) headers.authorization = `Bearer ${effectiveLlm.apiKey}`;
+      if (viaProxy) headers["X-LLM-Base-URL"] = normalizeBaseUrl(effectiveLlm.baseUrl);
       const response = await fetch(`${baseUrl}/chat/completions`, {
         method: "POST",
         headers,
         body: JSON.stringify({
-          model: settings.llm.modelId,
+          model: effectiveLlm.modelId,
           messages: [{ role: "user", content: "ping" }],
           max_tokens: 1,
           stream: false,
@@ -461,35 +505,58 @@ export function SettingsPanel({
     }
   };
 
+  const testRealtimeConnection = async () => {
+    if (!settings.realtime.google.apiKey.trim()) {
+      setRealtimeConnectionStatus("Enter a Google Gemini API key before testing Realtime voice.");
+      return;
+    }
+    setRealtimeTesting(true);
+    setRealtimeConnectionStatus("Connecting to Google Gemini Live…");
+    try {
+      await onTestRealtime();
+      setRealtimeConnectionStatus("Test passed: Google Gemini Live is ready for realtime audio.");
+    } catch (error) {
+      setRealtimeConnectionStatus(`Realtime connection failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+    } finally {
+      setRealtimeTesting(false);
+    }
+  };
+
+  const selectVoiceRoute = (route: VoiceRoute) => {
+    setVoiceRoute(route);
+    setConnectionStatus("");
+    setRealtimeConnectionStatus("");
+  };
+
   const fetchRemoteModels = async () => {
-    if (settings.llm.transport === "local") {
+    if (effectiveLlm.transport === "local") {
       // Local models are not fetched — they live in `localModelPresets` and
       // are managed through the download list. Surface this in the shared
       // status line and bail out without touching `discoverState`.
       setConnectionStatus("Local models are managed from the download list, not fetched from an API.");
       return;
     }
-    const viaProxy = settings.llm.transport === "proxy";
+    const viaProxy = effectiveLlm.transport === "proxy";
     // Capture the URL we're fetching from so a Provider/Transport change
     // mid-flight can't apply the stale result to the new baseUrl. The
     // guard below ignores responses whose `baseUrl` no longer matches.
-    const targetBaseUrl = settings.llm.baseUrl;
+    const targetBaseUrl = effectiveLlm.baseUrl;
     setDiscoverState({ status: "loading" });
     setConnectionStatus("Fetching the model list…");
     try {
       const baseUrl = viaProxy ? "/api/llm/v1" : normalizeBaseUrl(targetBaseUrl);
       const headers: Record<string, string> = {};
-      if (settings.llm.apiKey) headers.authorization = `Bearer ${settings.llm.apiKey}`;
+      if (effectiveLlm.apiKey) headers.authorization = `Bearer ${effectiveLlm.apiKey}`;
       if (viaProxy) headers["X-LLM-Base-URL"] = normalizeBaseUrl(targetBaseUrl);
       const response = await fetch(`${baseUrl}/models`, { headers });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const payload = (await response.json()) as { data?: Array<{ id?: string }> };
       const ids = payload.data?.flatMap((model) => (model.id ? [model.id] : [])) || [];
-      if (settings.llm.baseUrl !== targetBaseUrl) return;
+      if (getCurrentLlmBaseUrl() !== targetBaseUrl) return;
       setDiscoverState({ status: "success", baseUrl: targetBaseUrl, models: ids });
       setConnectionStatus(`Discovered ${ids.length} model${ids.length === 1 ? "" : "s"} from the API.`);
     } catch (error) {
-      if (settings.llm.baseUrl !== targetBaseUrl) return;
+      if (getCurrentLlmBaseUrl() !== targetBaseUrl) return;
       const message = error instanceof Error ? error.message : "Unknown error";
       setDiscoverState({ status: "error", message });
       setConnectionStatus(`Failed to fetch models: ${message}`);
@@ -497,14 +564,14 @@ export function SettingsPanel({
   };
 
   const downloadLlm = async () => {
-    if (!settings.llm.modelId.trim()) return;
+    if (!effectiveLlm.modelId.trim()) return;
     const controller = new AbortController();
     llmAbortRef.current = controller;
     setLlmProgress(llmResumeProgress);
     setLlmDownloadStatus(llmResumeProgress > 0 ? "Resuming the download…" : "Preparing the language model download…");
     try {
-      await downloadLocalModel(settings.llm.modelId, setLlmProgress, controller.signal);
-      setLocalDownloaded((current) => ({ ...current, [settings.llm.modelId]: true }));
+      await downloadLocalModel(effectiveLlm.modelId, setLlmProgress, controller.signal);
+      setLocalDownloaded((current) => ({ ...current, [effectiveLlm.modelId]: true }));
       setLlmResumeProgress(0);
       setLlmDownloadStatus("The language model has been downloaded and saved in your browser.");
     } catch (error) {
@@ -516,7 +583,7 @@ export function SettingsPanel({
     } finally {
       llmAbortRef.current = undefined;
       setLlmProgress(undefined);
-      void getLocalModelPartialProgress(settings.llm.modelId).then(setLlmResumeProgress).catch(() => undefined);
+      void getLocalModelPartialProgress(effectiveLlm.modelId).then(setLlmResumeProgress).catch(() => undefined);
     }
   };
 
@@ -567,136 +634,185 @@ export function SettingsPanel({
           <button onClick={() => setCharactersOpen(true)}>Manage characters</button>
         </section>
 
-        <section className="settings-section">
-          <h3>Language model</h3>
-          <Field label="Connection">
-            <select value={settings.llm.transport} onChange={(event) => {
-              const transport = event.target.value as LlmSettings["transport"];
-              // Pick a sensible default model + baseUrl whenever the user
-              // crosses transport boundaries, so the Model dropdown always
-              // has a matching preset to show.
-              let nextBaseUrl = settings.llm.baseUrl;
-              let nextModelId = settings.llm.modelId;
-              if (transport === "chrome") {
-                nextBaseUrl = CHROME_MODEL_URL;
-                nextModelId = CHROME_MODEL_ID;
-              } else if (transport === "local") {
-                nextModelId = localModelPresets[0].id;
-              } else if (settings.llm.transport === "local" || settings.llm.transport === "chrome") {
-                if (transport === "proxy") {
-                  nextBaseUrl = proxyProviders[0]?.baseUrl ?? defaultDirectProviders[0].baseUrl;
-                  nextModelId = proxyProviders[0]?.models[0]?.value
-                    ?? defaultDirectProviders[0].models[0]?.value
-                    ?? "";
-                } else {
-                  nextBaseUrl = defaultDirectProviders[0].baseUrl;
-                  nextModelId = defaultDirectProviders[0].models[0]?.value ?? "";
-                }
-              } else if (transport === "proxy" && !findLlmProvider(proxyProviders, settings.llm.baseUrl)) {
-                nextBaseUrl = proxyProviders[0]?.baseUrl ?? settings.llm.baseUrl;
-                nextModelId = proxyProviders[0]?.models[0]?.value ?? "";
-              } else if (transport === "direct" && !findLlmProvider(defaultDirectProviders, settings.llm.baseUrl)) {
-                nextBaseUrl = defaultDirectProviders[0].baseUrl;
-                nextModelId = defaultDirectProviders[0].models[0]?.value ?? "";
-              }
-              updateActiveConversationLlm({
-                transport,
-                baseUrl: nextBaseUrl,
-                modelId: nextModelId,
-              });
-              // The previously-fetched model list was bound to the old
-              // baseUrl — dropping it so the dropdown falls back to the
-              // new provider's built-in presets instead of a stale result.
-              setDiscoverState({ status: "idle" });
-              setConnectionStatus("");
-            }}>
-              <option value="proxy">Built-in Hono proxy</option>
-              <option value="direct">Direct OpenAI-compatible API</option>
-              <option value="local">Local wllama in the browser</option>
-              {(isChromePromptApiSupported(chromeAvailability) || settings.llm.transport === "chrome") && (
-                <option value="chrome" disabled={!isChromePromptApiSupported(chromeAvailability)}>
-                  Chrome built-in AI (Gemini Nano)
-                </option>
-              )}
-            </select>
-          </Field>
-          {(settings.llm.transport === "proxy" || settings.llm.transport === "direct") && (() => {
-            const viaProxy = settings.llm.transport === "proxy";
-            const providers = viaProxy ? proxyProviders : defaultDirectProviders;
-            const allowCustom = !viaProxy;
-            const matchedProvider = findLlmProvider(providers, settings.llm.baseUrl);
-            // If the persisted `baseUrl` doesn't match any provider AND
-            // custom isn't allowed (proxy mode), fall back to displaying
-            // the first provider. The actual state rewrite happens in a
-            // dedicated `useEffect` below so we don't trigger a render
-            // side-effect.
-            const displayedProvider = matchedProvider ?? (viaProxy ? providers[0] : undefined);
-            return (
-              <>
-                <Field label="Provider">
-                  <select
-                    value={displayedProvider?.id ?? customValue}
-                    onChange={(event) => {
-                      if (event.target.value === customValue) return;
-                      const provider = providers.find((item) => item.id === event.target.value);
-                      if (!provider) return;
-                      updateActiveConversationLlm({
-                        baseUrl: provider.baseUrl,
-                        modelId: provider.models[0]?.value ?? "",
-                      });
-                      // Provider switched — clear any stale fetch so the
-                      // dropdown lands on the new provider's presets.
-                      setDiscoverState({ status: "idle" });
-                    }}
-                  >
-                    {providers.map((provider) => (
-                      <option key={provider.id} value={provider.id}>{provider.label}</option>
-                    ))}
-                    {allowCustom && <option value={customValue}>Custom OpenAI-compatible API</option>}
-                  </select>
-                </Field>
-                <Field label="API URL">
-                  <input
-                    value={settings.llm.baseUrl}
-                    onChange={(event) => updateActiveConversationLlm({ baseUrl: event.target.value })}
-                    readOnly={viaProxy}
-                    aria-readonly={viaProxy || undefined}
-                    title={viaProxy ? "The URL is locked to the proxy's upstream whitelist." : undefined}
-                  />
-                </Field>
-                <SecretField value={settings.llm.apiKey} remember={settings.llm.rememberApiKey} onChange={(apiKey) => updateActiveConversationLlm({ apiKey })} onRemember={(rememberApiKey) => updateActiveConversationLlm({ rememberApiKey })} />
-              </>
-            );
-          })()}
-          <ModelChoiceField
-            label="Model"
-            value={settings.llm.modelId}
-            options={llmOptions}
-            downloaded={settings.llm.transport === "local" ? localDownloaded : undefined}
-            searchUrl={(query) => settings.llm.transport === "local"
-              ? huggingFaceSearch(query)
-              : settings.llm.transport === "chrome"
-                ? "https://developer.chrome.com/docs/ai/prompt-api"
-                : modelWebSearch(query)}
-            onChange={(modelId) => updateActiveConversationLlm({ modelId })}
-            onFetchModels={settings.llm.transport === "proxy" || settings.llm.transport === "direct"
-              ? () => void fetchRemoteModels()
-              : undefined}
-            fetching={discoverState.status === "loading"}
-            fetchError={discoverState.status === "error" ? discoverState.message : undefined}
-          />
-          {settings.llm.transport === "local" && <DownloadProgress progress={llmProgress ?? (llmResumeProgress || undefined)} status={llmDownloadStatus} />}
-          <div className="settings-actions">
-            {settings.llm.transport === "local" && (llmProgress === undefined
-              ? <button className="primary-button" onClick={() => void downloadLlm()}>{llmResumeProgress > 0 ? "▶ Resume download" : "↓ Download model"}</button>
-              : <button className="pause-button" onClick={() => llmAbortRef.current?.abort()}>Ⅱ Pause download</button>)}
-            <button onClick={() => void testConnection()}>Test connection</button>
+        <section className="settings-section voice-route-section">
+          <h3>Voice experience</h3>
+          <p className="settings-section-copy">Choose one route for voice conversations. The inactive route keeps its configuration for later.</p>
+          <div className="voice-route-grid" role="radiogroup" aria-label="Voice experience">
+            <VoiceRouteCard
+              route="realtime"
+              checked={settings.voiceRoute === "realtime"}
+              title="Realtime voice"
+              detail="Microphone ↔ Google Gemini Live native audio"
+              onChange={selectVoiceRoute}
+            />
+            <VoiceRouteCard
+              route="classic"
+              checked={settings.voiceRoute === "classic"}
+              title="Classic pipeline"
+              detail="Speech recognition → Language model → Speech synthesis"
+              onChange={selectVoiceRoute}
+            />
           </div>
-          {connectionStatus && <span className="status-copy" role="status">{connectionStatus}</span>}
         </section>
 
-        <section className="settings-section">
-          <h3>Speech recognition</h3>
+        <section className="settings-section voice-behavior-section">
+          <h3>Conversation behavior</h3>
+          <p className="settings-section-copy">These controls apply to both voice pipelines.</p>
+          <label className="toggle-row toggle-detail">
+            <input
+              type="checkbox"
+              checked={settings.voiceInteraction.handsFree}
+              onChange={(event) => updateVoiceInteraction({ handsFree: event.target.checked })}
+            />
+            <span><strong>Hands-free conversation</strong><small>Keep listening across spoken turns until you stop the microphone.</small></span>
+          </label>
+          <label className="toggle-row toggle-detail">
+            <input
+              type="checkbox"
+              checked={settings.voiceInteraction.allowVoiceInterruption}
+              onChange={(event) => updateVoiceInteraction({ allowVoiceInterruption: event.target.checked })}
+            />
+            <span><strong>Allow spoken interruptions</strong><small>Let your voice interrupt an assistant reply. The Stop button always remains available.</small></span>
+          </label>
+          <label className="toggle-row toggle-detail">
+            <input type="checkbox" checked={settings.subtitlesEnabled} onChange={(event) => setSubtitlesEnabled(event.target.checked)} />
+            <span><strong>Show subtitles</strong><small>Transcripts still stay in chat history when subtitles are hidden.</small></span>
+          </label>
+          <div className="shared-capabilities" aria-label="Available in both pipelines">
+            <span>✓ Live2D tools</span>
+            <span>✓ Chat history</span>
+            <span>✓ Character profiles</span>
+          </div>
+        </section>
+
+        {settings.voiceRoute === "classic" ? (
+          <div className="settings-route-stack" aria-label="Classic voice pipeline settings">
+            <details className="settings-section route-settings-details" open>
+              <summary><strong>Language model</strong><small>{effectiveLlm.transport} · {effectiveLlm.modelId}</small></summary>
+              <Field label="Connection">
+                <select value={effectiveLlm.transport} onChange={(event) => {
+                  const transport = event.target.value as LlmSettings["transport"];
+                  // Pick a sensible default model + baseUrl whenever the user
+                  // crosses transport boundaries, so the Model dropdown always
+                  // has a matching preset to show.
+                  let nextBaseUrl = effectiveLlm.baseUrl;
+                  let nextModelId = effectiveLlm.modelId;
+                  if (transport === "chrome") {
+                    nextBaseUrl = CHROME_MODEL_URL;
+                    nextModelId = CHROME_MODEL_ID;
+                  } else if (transport === "local") {
+                    nextModelId = localModelPresets[0].id;
+                  } else if (effectiveLlm.transport === "local" || effectiveLlm.transport === "chrome") {
+                    if (transport === "proxy") {
+                      nextBaseUrl = proxyProviders[0]?.baseUrl ?? defaultDirectProviders[0].baseUrl;
+                      nextModelId = proxyProviders[0]?.models[0]?.value
+                        ?? defaultDirectProviders[0].models[0]?.value
+                        ?? "";
+                    } else {
+                      nextBaseUrl = defaultDirectProviders[0].baseUrl;
+                      nextModelId = defaultDirectProviders[0].models[0]?.value ?? "";
+                    }
+                  } else if (transport === "proxy" && !findLlmProvider(proxyProviders, effectiveLlm.baseUrl)) {
+                    nextBaseUrl = proxyProviders[0]?.baseUrl ?? effectiveLlm.baseUrl;
+                    nextModelId = proxyProviders[0]?.models[0]?.value ?? "";
+                  } else if (transport === "direct" && !findLlmProvider(defaultDirectProviders, effectiveLlm.baseUrl)) {
+                    nextBaseUrl = defaultDirectProviders[0].baseUrl;
+                    nextModelId = defaultDirectProviders[0].models[0]?.value ?? "";
+                  }
+                  updateActiveConversationLlm({
+                    transport,
+                    baseUrl: nextBaseUrl,
+                    modelId: nextModelId,
+                  });
+                  // The previously-fetched model list was bound to the old
+                  // baseUrl — dropping it so the dropdown falls back to the
+                  // new provider's built-in presets instead of a stale result.
+                  setDiscoverState({ status: "idle" });
+                  setConnectionStatus("");
+                }}>
+                  <option value="proxy">Built-in Hono proxy</option>
+                  <option value="direct">Direct OpenAI-compatible API</option>
+                  <option value="local">Local wllama in the browser</option>
+                  {(isChromePromptApiSupported(chromeAvailability) || effectiveLlm.transport === "chrome") && (
+                    <option value="chrome" disabled={!isChromePromptApiSupported(chromeAvailability)}>
+                      Chrome built-in AI (Gemini Nano)
+                    </option>
+                  )}
+                </select>
+              </Field>
+              {(effectiveLlm.transport === "proxy" || effectiveLlm.transport === "direct") && (() => {
+                const viaProxy = effectiveLlm.transport === "proxy";
+                const providers = viaProxy ? proxyProviders : defaultDirectProviders;
+                const allowCustom = !viaProxy;
+                const matchedProvider = findLlmProvider(providers, effectiveLlm.baseUrl);
+                return (
+                  <>
+                    <Field label="Provider">
+                      <select
+                        value={matchedProvider?.id ?? customValue}
+                        onChange={(event) => {
+                          if (event.target.value === customValue) return;
+                          const provider = providers.find((item) => item.id === event.target.value);
+                          if (!provider) return;
+                          updateActiveConversationLlm({
+                            baseUrl: provider.baseUrl,
+                            modelId: provider.models[0]?.value ?? "",
+                          });
+                          // Provider switched — clear any stale fetch so the
+                          // dropdown lands on the new provider's presets.
+                          setDiscoverState({ status: "idle" });
+                        }}
+                      >
+                        {providers.map((provider) => (
+                          <option key={provider.id} value={provider.id}>{provider.label}</option>
+                        ))}
+                        {allowCustom
+                          ? <option value={customValue}>Custom OpenAI-compatible API</option>
+                          : !matchedProvider && <option value={customValue} disabled>Unavailable configured provider</option>}
+                      </select>
+                    </Field>
+                    <Field label="API URL">
+                      <input
+                        value={effectiveLlm.baseUrl}
+                        onChange={(event) => updateActiveConversationLlm({ baseUrl: event.target.value })}
+                        readOnly={viaProxy}
+                        aria-readonly={viaProxy || undefined}
+                        title={viaProxy ? "The URL is locked to the proxy's upstream whitelist." : undefined}
+                      />
+                    </Field>
+                    <SecretField value={effectiveLlm.apiKey} remember={effectiveLlm.rememberApiKey} onChange={(apiKey) => updateActiveConversationLlm({ apiKey })} onRemember={(rememberApiKey) => updateActiveConversationLlm({ rememberApiKey })} />
+                  </>
+                );
+              })()}
+              <ModelChoiceField
+                label="Model"
+                value={effectiveLlm.modelId}
+                options={llmOptions}
+                downloaded={effectiveLlm.transport === "local" ? localDownloaded : undefined}
+                searchUrl={(query) => effectiveLlm.transport === "local"
+                  ? huggingFaceSearch(query)
+                  : effectiveLlm.transport === "chrome"
+                    ? "https://developer.chrome.com/docs/ai/prompt-api"
+                    : modelWebSearch(query)}
+                onChange={(modelId) => updateActiveConversationLlm({ modelId })}
+                onFetchModels={effectiveLlm.transport === "proxy" || effectiveLlm.transport === "direct"
+                  ? () => void fetchRemoteModels()
+                  : undefined}
+                fetching={discoverState.status === "loading"}
+                fetchError={discoverState.status === "error" ? discoverState.message : undefined}
+              />
+              {effectiveLlm.transport === "local" && <DownloadProgress progress={llmProgress ?? (llmResumeProgress || undefined)} status={llmDownloadStatus} />}
+              <div className="settings-actions">
+                {effectiveLlm.transport === "local" && (llmProgress === undefined
+                  ? <button className="primary-button" onClick={() => void downloadLlm()}>{llmResumeProgress > 0 ? "▶ Resume download" : "↓ Download model"}</button>
+                  : <button className="pause-button" onClick={() => llmAbortRef.current?.abort()}>Ⅱ Pause download</button>)}
+                <button onClick={() => void testConnection()}>Test connection</button>
+              </div>
+              {connectionStatus && <span className="status-copy" role="status">{connectionStatus}</span>}
+            </details>
+
+        <details className="settings-section route-settings-details">
+          <summary><strong>Speech recognition</strong><small>{settings.stt.provider}</small></summary>
           <Field label="Provider">
             <select value={settings.stt.provider} onChange={(event) => updateStt({ provider: event.target.value as SttSettings["provider"] })}>
               <option value="web-speech">Browser Web Speech</option>
@@ -717,12 +833,11 @@ export function SettingsPanel({
             </>
           )}
           <LanguageField value={settings.stt.language} onChange={(language) => updateStt({ language })} />
-          <label className="toggle-row"><input type="checkbox" checked={settings.stt.continuous} onChange={(event) => updateStt({ continuous: event.target.checked })} />Continuous recognition</label>
           <button onClick={onTestStt}>Test recognition</button>
-        </section>
+        </details>
 
-        <section className="settings-section">
-          <h3>Speech synthesis</h3>
+        <details className="settings-section route-settings-details">
+          <summary><strong>Speech synthesis</strong><small>{settings.tts.provider} · {settings.tts.voice}</small></summary>
           <Field label="Provider">
             <select value={settings.tts.provider} onChange={(event) => {
               const provider = event.target.value as TtsSettings["provider"];
@@ -814,10 +929,49 @@ export function SettingsPanel({
               : <button className="pause-button" onClick={() => voiceAbortRef.current?.abort()}>Ⅱ Pause download</button>)}
             <button onClick={onTestTts}>Test speech</button>
           </div>
-        </section>
+        </details>
+          </div>
+        ) : (
+          <section className="settings-section realtime-settings" aria-label="Google Gemini Live settings">
+            <div className="settings-section-heading">
+              <h3>Google Gemini Live</h3>
+              <span className="settings-badge">Realtime</span>
+            </div>
+            <p className="settings-section-copy">Google handles listening, reasoning, and native speech in one low-latency session. Classic STT and TTS are bypassed.</p>
+            <div className="realtime-provider-card">
+              <span>Provider</span>
+              <strong>Google Gemini Live</strong>
+              <small>Native bidirectional audio · tools and transcripts enabled</small>
+            </div>
+            <Field label="Model">
+              <div className="realtime-model-row">
+                <input value={googleRealtimeModel.value} readOnly />
+                <span className="settings-badge">Preview</span>
+              </div>
+            </Field>
+            <Field label="Prebuilt voice">
+              <select value={settings.realtime.google.voiceName} onChange={(event) => updateRealtime({ voiceName: event.target.value })}>
+                {googleRealtimeVoices.map((voice) => <option key={voice.value} value={voice.value}>{voice.label}</option>)}
+              </select>
+            </Field>
+            <SecretField
+              value={settings.realtime.google.apiKey}
+              remember={settings.realtime.google.rememberApiKey}
+              onChange={(apiKey) => updateRealtime({ apiKey })}
+              onRemember={(rememberApiKey) => updateRealtime({ rememberApiKey })}
+              autoFocus={!settings.realtime.google.apiKey}
+            />
+            <p className="credential-warning" role="note">Direct browser access cannot make a long-lived API key secret: page scripts and browser tooling can extract it. Leave Remember off on shared devices and restrict the key in Google Cloud.</p>
+            <div className="settings-actions">
+              <button disabled={realtimeTesting} onClick={() => void testRealtimeConnection()}>
+                {realtimeTesting ? "Testing Realtime…" : "Test Realtime connection"}
+              </button>
+            </div>
+            {realtimeConnectionStatus ? <span className="status-copy" role="status">{realtimeConnectionStatus}</span> : null}
+          </section>
+        )}
 
-        <section className="settings-section compact">
-          <label className="toggle-row"><input type="checkbox" checked={settings.subtitlesEnabled} onChange={(event) => setSubtitlesEnabled(event.target.checked)} />Show subtitles</label>
+        <section className="settings-section settings-reset">
           <button className="danger-button" onClick={resetSettings}>Restore defaults</button>
         </section>
       </aside>
@@ -838,6 +992,30 @@ export function SettingsPanel({
         />
       ) : null}
     </div>
+  );
+}
+
+function VoiceRouteCard({ route, checked, title, detail, onChange }: {
+  route: VoiceRoute;
+  checked: boolean;
+  title: string;
+  detail: string;
+  onChange(route: VoiceRoute): void;
+}) {
+  return (
+    <label className={`voice-route-card${checked ? " selected" : ""}`}>
+      <input
+        type="radio"
+        name="voice-route"
+        value={route}
+        checked={checked}
+        onChange={() => onChange(route)}
+      />
+      <span>
+        <strong>{title}</strong>
+        <small>{detail}</small>
+      </span>
+    </label>
   );
 }
 
@@ -915,15 +1093,37 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return <label className="field"><span>{label}</span>{children}</label>;
 }
 
-function SecretField({ value, remember, onChange, onRemember }: {
+function SecretField({ value, remember, onChange, onRemember, autoFocus = false }: {
   value: string;
   remember: boolean;
   onChange(value: string): void;
   onRemember(value: boolean): void;
+  autoFocus?: boolean;
 }) {
+  const [revealed, setRevealed] = useState(false);
   return (
     <>
-      <Field label="API Key"><input type="password" autoComplete="off" value={value} onChange={(event) => onChange(event.target.value)} placeholder="Stored in this tab by default" /></Field>
+      <div className="field">
+        <span>API Key</span>
+        <div className="secret-input-row">
+          <input
+            aria-label="API Key"
+            type={revealed ? "text" : "password"}
+            autoComplete="off"
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder="Stored in this tab by default"
+            autoFocus={autoFocus}
+          />
+          <button
+            type="button"
+            className="secret-visibility-button"
+            aria-label={revealed ? "Hide API key" : "Show API key"}
+            aria-pressed={revealed}
+            onClick={() => setRevealed((current) => !current)}
+          >{revealed ? "Hide" : "Show"}</button>
+        </div>
+      </div>
       <label className="toggle-row"><input type="checkbox" checked={remember} onChange={(event) => onRemember(event.target.checked)} />Remember this key on this device</label>
     </>
   );

@@ -16,6 +16,8 @@ export interface ConversationSummary {
   content: string;
   compactedMessageCount: number;
   updatedAt: number;
+  /** New summaries keep the full transcript; absent means legacy pruned storage. */
+  transcriptRetained?: boolean;
 }
 
 export interface Conversation {
@@ -38,15 +40,20 @@ export interface ConversationExport {
 }
 
 const toolCallSchema = z.object({
+  callId: z.string().trim().min(1).max(500).optional(),
   name: z.string().trim().min(1).max(200),
   input: z.unknown(),
   output: z.unknown().optional(),
   error: z.string().max(100_000).optional(),
+  canceled: z.boolean().optional(),
 }).passthrough();
 
 const chatMessageSchema: z.ZodType<ChatMessage> = z.object({
   role: z.enum(["system", "user", "assistant"]),
   content: z.string().max(2_000_000),
+  inputMode: z.enum(["text", "voice"]).optional(),
+  transcriptUnavailable: z.boolean().optional(),
+  interrupted: z.boolean().optional(),
   reasoning: z.string().max(2_000_000).optional(),
   toolCalls: z.array(toolCallSchema).max(2_000).optional(),
 }).passthrough();
@@ -69,6 +76,7 @@ export const conversationSchema: z.ZodType<Conversation> = z.object({
     content: z.string().trim().min(1).max(2_000_000),
     compactedMessageCount: z.number().int().positive(),
     updatedAt: z.number().int().nonnegative(),
+    transcriptRetained: z.boolean().optional(),
   }).strict().optional(),
   messages: z.array(chatMessageSchema).max(10_000),
 }).strict().refine((conversation) => conversation.updatedAt >= conversation.createdAt, {

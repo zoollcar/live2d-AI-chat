@@ -18,6 +18,7 @@ import { buildRuntimeConversationMessages, planConversationCompaction } from "@/
 import type { SceneController } from "@/model/live2d/scene-controller";
 import type { LlmSettings } from "@live2d-chat/shared";
 import { Live2DStage } from "@/presentation/stage/Live2DStage";
+import { useGoogleRealtime } from "./use-google-realtime";
 
 const log = createLogger("app");
 
@@ -94,6 +95,8 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [listening, setListening] = useState(false);
   const [running, setRunning] = useState(false);
+  const realtimeNeedsConfiguration = settings.voiceRoute === "realtime"
+    && !settings.realtime.google.apiKey.trim();
   const abortRef = useRef<AbortController | undefined>(undefined);
   const sttRef = useRef<SpeechRecognitionProvider | undefined>(undefined);
   const speechQueueRef = useRef<SpeechQueue | undefined>(undefined);
@@ -136,7 +139,9 @@ export default function App() {
   }, [activeConversation?.characterId, activeConversation?.id, setActiveProfile]);
 
   useEffect(() => {
-    if (!activeConversation || (conversationLlmSettings.transport === "local" && running)) return;
+    if (settings.voiceRoute !== "classic"
+      || !activeConversation
+      || (conversationLlmSettings.transport === "local" && running)) return;
     const plan = planConversationCompaction(activeConversation);
     if (!plan || compactionControllersRef.current.has(activeConversation.id)) return;
     const controller = new AbortController();
@@ -161,7 +166,7 @@ export default function App() {
         });
       })
       .finally(() => compactionControllersRef.current.delete(activeConversation.id));
-  }, [activeConversation, applyCompaction, conversationLlmSettings, running]);
+  }, [activeConversation, applyCompaction, conversationLlmSettings, running, settings.voiceRoute]);
 
   useEffect(() => () => {
     for (const controller of compactionControllersRef.current.values()) controller.abort();
@@ -169,12 +174,19 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!scene) return;
+    if (!scene || settings.voiceRoute !== "classic") {
+      speechQueueRef.current?.cancel();
+      speechQueueRef.current = undefined;
+      return;
+    }
     speechQueueRef.current?.cancel();
     const provider = createTtsProvider(effectiveTtsSettings);
-    speechQueueRef.current = new SpeechQueue(provider, effectiveTtsSettings, scene, setSubtitle);
+    speechQueueRef.current = new SpeechQueue(provider, effectiveTtsSettings, scene, (sentence) => {
+      setSubtitle(sentence);
+      setStatus({ kind: "busy", message: "AI is speaking" });
+    });
     return () => speechQueueRef.current?.cancel();
-  }, [effectiveTtsSettings, scene]);
+  }, [effectiveTtsSettings, scene, settings.voiceRoute]);
 
   // Mirror `messages` into a ref so `sendMessage` can read the latest history
   // snapshot regardless of which version of the callback actually runs.
@@ -186,6 +198,32 @@ export default function App() {
   useEffect(() => { messagesRef.current = messages; }, [messages]);
 
   const visibleMessages = useMemo(() => messages.filter((message) => message.role !== "system"), [messages]);
+
+  const {
+    sendText: sendRealtimeText,
+    startListening: startRealtimeListening,
+    stopListening: stopRealtimeListening,
+    stopEverything: stopRealtimeEverything,
+    dispose: disposeRealtime,
+    testConnection: testRealtimeConnection,
+  } = useGoogleRealtime({
+    enabled: settings.voiceRoute === "realtime",
+    scene,
+    profile: activeProfile,
+    conversation: activeConversation,
+    settings: settings.realtime,
+    interaction: settings.voiceInteraction,
+    callbacks: {
+      setListening: (value) => {
+        listeningRef.current = value;
+        setListening(value);
+      },
+      setRunning,
+      setSubtitle,
+      setStatus: (kind, message) => setStatus({ kind, message }),
+      openSettings: () => setSettingsOpen(true),
+    },
+  });
 
   // Full teardown — used when the user explicitly wants to leave the
   // conversation (escape, close tab, switch provider, etc.). Stops the LLM
@@ -200,9 +238,27 @@ export default function App() {
     speechQueueRef.current?.cancel();
     listeningRef.current = false;
     continuousRef.current = false;
+    userTypedRef.current = false;
     setListening(false);
     setRunning(false);
-  }, []);
+    void disposeRealtime();
+  }, [disposeRealtime]);
+
+  useEffect(() => {
+    if (settings.voiceRoute !== "realtime") return;
+    for (const controller of compactionControllersRef.current.values()) controller.abort();
+    setMemoryStatus(undefined);
+    abortRef.current?.abort();
+    abortRef.current = undefined;
+    sttRef.current?.abort();
+    sttRef.current = undefined;
+    segmenterRef.current.reset();
+    speechQueueRef.current?.cancel();
+    listeningRef.current = false;
+    continuousRef.current = false;
+    setListening(false);
+    setRunning(false);
+  }, [settings.voiceRoute]);
 
   // Soft interrupt — stops the AI's current LLM stream and any in-flight TTS
   // but leaves the STT session alive so the user can barge in with another
@@ -233,7 +289,7 @@ export default function App() {
     return () => { cancelled = true; };
   }, [activeConversation?.id, activeProfile, scene, stopEverything]);
 
-  const sendMessage = useCallback(async (rawText: string) => {
+  const sendClassicMessage = useCallback(async (rawText: string) => {
     const text = rawText.trim();
     if (!text || !scene) return;
     if (conversationLlmSettings.transport === "local" && activeConversationId) {
@@ -242,12 +298,22 @@ export default function App() {
     // Only stop the AI's playback; keep STT alive so continuous listeners can
     // barge in without re-clicking the mic.
     interruptPlayback();
+    if (!settings.voiceInteraction.allowVoiceInterruption) {
+      sttRef.current?.abort();
+      sttRef.current = undefined;
+      listeningRef.current = false;
+      setListening(false);
+    }
     const controller = new AbortController();
     abortRef.current = controller;
     // Read the latest history from the ref so this callback works correctly
     // even when called from a stale closure (e.g. the onFinal handler that was
     // registered before subsequent messages were appended).
-    const userMessage: ChatMessage = { role: "user", content: text };
+    const userMessage: ChatMessage = {
+      role: "user",
+      content: text,
+      inputMode: userTypedRef.current ? "text" : "voice",
+    };
     const history: ChatMessage[] = [...messagesRef.current, userMessage];
     const contextHistory = activeConversationRef.current
       ? buildRuntimeConversationMessages(activeConversationRef.current)
@@ -345,26 +411,57 @@ export default function App() {
       } else if (event.type === "done") {
         const remaining = segmenterRef.current.flush();
         if (remaining) speechQueueRef.current?.enqueue(remaining);
-        setStatus(STATUS_READY);
-        setRunning(false);
-        void flushActiveConversation();
-        // Auto-restart the mic so the next utterance flows without a click.
-        // We use restartListening() (not startListening()) because Chrome's
-        // `continuous: true` mode keeps the same recognition object alive and
-        // starts returning empty-final noise from the AI's TTS bleeding into
-        // the mic. A hard teardown + fresh session gives us a clean slate.
-        // Skip this when the user just typed the message — they explicitly
-        // chose text input, so the mic should stay off until they click it.
-        if (continuousRef.current && !userTypedRef.current) {
-          log.debug("agent done — auto-restarting listener (fresh session)");
-          void restartListeningRef.current?.();
-        }
-        userTypedRef.current = false;
+        // Model generation completing is not the same as audible output
+        // completing. Keep the route busy and the non-interruptible mic gated
+        // until the final TTS item has really drained from the playback queue.
+        const queue = speechQueueRef.current;
+        void (queue?.whenIdle() ?? Promise.resolve()).then(() => {
+          if (controller.signal.aborted || abortRef.current !== controller) return;
+          abortRef.current = undefined;
+          setStatus(STATUS_READY);
+          setRunning(false);
+          void flushActiveConversation();
+          if (continuousRef.current && !userTypedRef.current) {
+            log.debug("agent audio idle — auto-restarting listener (fresh session)");
+            void restartListeningRef.current?.();
+          }
+          userTypedRef.current = false;
+        });
       }
     };
 
     await runtime.run({ messages: runtimeHistory, settings: conversationLlmSettings, scene, signal: controller.signal, emit });
-  }, [activeConversationId, conversationLlmSettings, flushActiveConversation, interruptPlayback, scene, setMessages]);
+  }, [
+    activeConversationId,
+    conversationLlmSettings,
+    flushActiveConversation,
+    interruptPlayback,
+    scene,
+    setMessages,
+    settings.voiceInteraction.allowVoiceInterruption,
+  ]);
+
+  const sendMessage = useCallback(async (text: string) => {
+    try {
+      if (settings.voiceRoute === "realtime") {
+        try {
+          await sendRealtimeText(text);
+        } finally {
+          // Realtime records the input mode in its own turn state. Do not let
+          // this classic-route guard leak into a later voice turn after a
+          // route switch, including when setup failed.
+          userTypedRef.current = false;
+        }
+      } else {
+        await sendClassicMessage(text);
+      }
+    } catch (error) {
+      setStatus({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Unable to send the message.",
+      });
+    }
+  }, [sendClassicMessage, sendRealtimeText, settings.voiceRoute]);
 
   // startListeningRef mirrors `startListening` so async callbacks above can
   // reach the latest version without rebuilding sendMessage every time STT
@@ -379,6 +476,10 @@ export default function App() {
   const sendMessageRef = useRef<((text: string) => Promise<void>) | undefined>(undefined);
 
   const startListening = useCallback(async () => {
+    if (running && !settings.voiceInteraction.allowVoiceInterruption) {
+      setStatus({ kind: "busy", message: "Voice interruptions are disabled while the AI is speaking" });
+      return;
+    }
     log.debug("startListening: invoked", { provider: settings.stt.provider, lang: settings.stt.language });
     // Tear down any prior STT instance — this is the only safe path that
     // touches the mic. sendMessage() no longer aborts STT, so this is the
@@ -390,8 +491,12 @@ export default function App() {
     sttRef.current = provider;
     try {
       await provider.start({
+        onSpeechStart: () => {
+          if (settings.voiceInteraction.allowVoiceInterruption) interruptPlayback();
+        },
         onInterim: (text) => {
           log.debug("onInterim", { length: text.length, text });
+          if (settings.voiceInteraction.allowVoiceInterruption) interruptPlayback();
           setSubtitle(text);
         },
         onFinal: (text) => {
@@ -400,7 +505,7 @@ export default function App() {
           if (!text) return;
           // Barge-in: cut the AI's playback but keep this STT session alive
           // so the next utterance flows through the same recognition stream.
-          interruptPlayback();
+          if (settings.voiceInteraction.allowVoiceInterruption) interruptPlayback();
           // Go through the ref so we always invoke the version of sendMessage
           // built against the latest `messages`, not the one captured when
           // these callbacks were first registered.
@@ -450,7 +555,7 @@ export default function App() {
       setListening(false);
       listeningRef.current = false;
     }
-  }, [interruptPlayback, settings.stt]);
+  }, [interruptPlayback, running, settings.stt, settings.voiceInteraction.allowVoiceInterruption]);
 
   // Force a clean STT session: abort whatever's running and start fresh. This
   // is what the auto-restart path uses after the LLM finishes speaking,
@@ -507,7 +612,16 @@ export default function App() {
   }, [sendMessage]);
 
   const onMicButtonClick = useCallback(async () => {
+    if (settings.voiceRoute === "realtime") {
+      if (listeningRef.current) await stopRealtimeListening();
+      else await startRealtimeListening();
+      return;
+    }
     if (running) {
+      if (!settings.voiceInteraction.allowVoiceInterruption) {
+        setStatus({ kind: "busy", message: "Voice interruptions are disabled; use Stop to cancel the reply" });
+        return;
+      }
       // Barge-in: stop the AI's playback and reopen the mic without making
       // the user click again. Leave continuous mode alone so the next reply
       // also auto-restarts. Clear the typed flag so this turn counts as a
@@ -524,21 +638,31 @@ export default function App() {
       await stopListening();
     } else {
       log.debug("mic click while idle — starting continuous listening");
-      continuousRef.current = settings.stt.continuous;
+      continuousRef.current = settings.voiceInteraction.handsFree;
       await startListening();
     }
-  }, [interruptPlayback, running, settings.stt.continuous, startListening, stopListening]);
+  }, [
+    interruptPlayback,
+    running,
+    settings.voiceInteraction.allowVoiceInterruption,
+    settings.voiceInteraction.handsFree,
+    settings.voiceRoute,
+    startListening,
+    startRealtimeListening,
+    stopListening,
+    stopRealtimeListening,
+  ]);
 
   // When the user toggles the "Continuous recognition" setting on while idle,
   // we want the next click of the mic (or a fresh click cycle) to behave
   // accordingly. When they toggle it off mid-session, immediately stop so the
   // auto-restart doesn't kick in after the next AI reply.
   useEffect(() => {
-    continuousRef.current = settings.stt.continuous;
-    if (!settings.stt.continuous && !running && listeningRef.current) {
+    continuousRef.current = settings.voiceInteraction.handsFree;
+    if (!settings.voiceInteraction.handsFree && !running && listeningRef.current) {
       void stopListening();
     }
-  }, [running, settings.stt.continuous, stopListening]);
+  }, [running, settings.voiceInteraction.handsFree, stopListening]);
 
   const onStageReady = useCallback((controller: SceneController) => {
     setScene(controller);
@@ -612,6 +736,15 @@ export default function App() {
                   </span>
                 ) : null}
               </small>
+              {realtimeNeedsConfiguration ? (
+                <button
+                  className="status-chip status-error status-config-button"
+                  type="button"
+                  onClick={() => setSettingsOpen(true)}
+                >
+                  <span className="status-message">Realtime needs configuration</span>
+                </button>
+              ) : null}
               {memoryStatus ? (
                 <small className={`status-chip memory-status status-${memoryStatus.kind}`}>
                   <span className="status-message">{memoryStatus.message}</span>
@@ -639,7 +772,13 @@ export default function App() {
             submitTypedMessage(input);
           }
         }} placeholder="Type a message…" />
-        {running ? <button type="button" className="send-button stop" onClick={() => { continuousRef.current = false; stopEverything(); }}>■</button> : <button className="send-button" disabled={!scene || !input.trim()}>↑</button>}
+        {running ? (
+          <button type="button" className="send-button stop" onClick={() => {
+            continuousRef.current = false;
+            if (settings.voiceRoute === "realtime") void stopRealtimeEverything();
+            else stopEverything();
+          }}>■</button>
+        ) : <button className="send-button" disabled={!scene || !input.trim()}>↑</button>}
       </form>
 
       {settingsOpen ? (
@@ -649,6 +788,7 @@ export default function App() {
             onCreateConversation={onCreateConversation}
             onDeleteConversation={onDeleteConversation}
             onSelectConversation={onSelectConversation}
+            onTestRealtime={testRealtimeConnection}
             onTestStt={() => void startListening()}
             onTestTts={() => speechQueueRef.current?.enqueue(
               effectiveTtsSettings.language.toLowerCase().startsWith("zh")

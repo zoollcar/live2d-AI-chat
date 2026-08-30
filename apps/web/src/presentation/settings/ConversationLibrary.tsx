@@ -28,7 +28,9 @@ function safeStringify(value: unknown): string {
 }
 
 function ToolCallEntry({ call }: { call: ToolCallRecord }) {
-  const outputText = call.output !== undefined ? safeStringify(call.output) : call.error;
+  const outputText = call.canceled
+    ? "Canceled before execution"
+    : call.output !== undefined ? safeStringify(call.output) : call.error;
   return (
     <details className="history-tool-call">
       <summary>{call.name}</summary>
@@ -159,8 +161,12 @@ export function ConversationLibrary({ onClose, onCreateConversation, onDeleteCon
             ) : null}
             {activeConversation?.messages.filter((message) => message.role !== "system").map((message, index) => (
               <article className={`history-message ${message.role}`} key={`${index}-${message.role}`}>
-                <span>{message.role === "user" ? "User" : "Assistant"}</span>
-                <p>{message.content || "…"}</p>
+                <span>
+                  {message.role === "user" ? "User" : "Assistant"}
+                  {message.inputMode === "voice" ? " · Voice" : ""}
+                  {message.interrupted ? " · Interrupted" : ""}
+                </span>
+                <p>{message.transcriptUnavailable ? "Voice transcript unavailable" : message.content || "…"}</p>
                 {message.role === "assistant" && message.reasoning ? (
                   <details className="history-thinking"><summary>Thinking</summary><pre>{message.reasoning}</pre></details>
                 ) : null}

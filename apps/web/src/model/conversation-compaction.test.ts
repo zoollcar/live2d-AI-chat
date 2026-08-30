@@ -3,6 +3,7 @@ import type { ChatMessage } from "@/agent";
 import { createConversation } from "./conversation";
 import {
   applyConversationCompaction,
+  buildRealtimeInitialHistory,
   buildRuntimeConversationMessages,
   buildSummaryPrompt,
   planConversationCompaction,
@@ -51,6 +52,22 @@ describe("conversation compaction", () => {
     ]);
   });
 
+  it("seeds realtime with only the last eight transcribed user turns", () => {
+    const messages: ChatMessage[] = [{ role: "system", content: "Character contract" }];
+    for (let turn = 1; turn <= 10; turn += 1) {
+      messages.push({ role: "user", content: `Question ${turn}`, inputMode: "voice" });
+      messages.push({ role: "assistant", content: `Answer ${turn}` });
+    }
+    messages.push({ role: "user", content: "", inputMode: "voice", transcriptUnavailable: true });
+    const conversation = createConversation({ characterId: "ai-secretary", modelSnapshot, messages, now: 1 });
+
+    const history = buildRealtimeInitialHistory(conversation);
+
+    expect(history[0]).toEqual({ role: "user", text: "Question 3" });
+    expect(history.at(-1)).toEqual({ role: "model", text: "Answer 10" });
+    expect(history).toHaveLength(16);
+  });
+
   it("drops reasoning and tool inputs while retaining bounded necessary results", () => {
     const conversation = createConversation({
       characterId: "ai-secretary",
@@ -96,7 +113,34 @@ describe("conversation compaction", () => {
 
     expect(compacted?.messages[0]).toEqual({ role: "system", content: "Character contract" });
     expect(compacted?.messages.at(-1)?.content).toBe("Concurrent answer");
-    expect(compacted?.summary).toMatchObject({ content: "Durable summary", compactedMessageCount: 4 });
+    expect(compacted?.messages).toEqual(withConcurrentTurn.messages);
+    expect(compacted?.summary).toMatchObject({
+      content: "Durable summary",
+      compactedMessageCount: 4,
+      transcriptRetained: true,
+    });
+    expect(buildRuntimeConversationMessages(compacted!).map((message) => message.content)).toEqual([
+      "Character contract",
+      "<conversation_summary>\nDurable summary\n</conversation_summary>",
+      "Question 3",
+      "Answer 3",
+      "Question 4",
+      "Answer 4",
+      "Question 5",
+      "Answer 5",
+      "Question 6",
+      "Answer 6",
+      "Question 7",
+      "Answer 7",
+      "Question 8",
+      "Answer 8",
+      "Question 9",
+      "Answer 9",
+      "Question 10",
+      "Answer 10",
+      "Concurrent question",
+      "Concurrent answer",
+    ]);
 
     const changedPrefix = {
       ...conversation,
@@ -104,5 +148,30 @@ describe("conversation compaction", () => {
         index === 1 ? { ...message, content: "Changed while summarizing" } : message),
     };
     expect(applyConversationCompaction(changedPrefix, plan, "Stale summary", 2)).toBeUndefined();
+  });
+
+  it("summarizes only newly aged messages after a retained-transcript compaction", () => {
+    const messages: ChatMessage[] = [{ role: "system", content: "Character contract" }];
+    for (let turn = 1; turn <= 10; turn += 1) {
+      messages.push({ role: "user", content: `Question ${turn}` });
+      messages.push({ role: "assistant", content: `Answer ${turn}` });
+    }
+    const conversation = createConversation({ characterId: "ai-secretary", modelSnapshot, messages, now: 1 });
+    const firstPlan = planConversationCompaction(conversation)!;
+    const firstCompaction = applyConversationCompaction(conversation, firstPlan, "First summary", 2)!;
+    const extended = {
+      ...firstCompaction,
+      messages: [
+        ...firstCompaction.messages,
+        { role: "user" as const, content: "Question 11" },
+        { role: "assistant" as const, content: "Answer 11" },
+      ],
+    };
+
+    const secondPlan = planConversationCompaction(extended)!;
+
+    expect(secondPlan.previousSummary).toBe("First summary");
+    expect(secondPlan.messages.map((message) => message.content)).toEqual(["Question 3", "Answer 3"]);
+    expect(secondPlan.compactedNonSystemCount).toBe(6);
   });
 });

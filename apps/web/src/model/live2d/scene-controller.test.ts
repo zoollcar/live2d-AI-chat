@@ -159,6 +159,40 @@ describe("SceneController visual state", () => {
     expect(speakMotionCalls).toHaveLength(0);
   });
 
+  it("drives and clears the mouth from streaming output levels", () => {
+    const { controller, coreModel, listeners } = createHarness();
+    controller.beginStreamingSpeech();
+    controller.setStreamingSpeechLevel(1.5);
+    listeners.get("beforeModelUpdate")?.();
+    expect(coreModel.setParameterValueById).toHaveBeenLastCalledWith("ParamMouthOpenY", 1);
+
+    controller.setStreamingSpeechLevel(0.35);
+    // Realtime providers emit many audio chunks. Repeated begin calls must not
+    // reset the current analyser envelope between adjacent chunks.
+    controller.beginStreamingSpeech();
+    listeners.get("beforeModelUpdate")?.();
+    expect(coreModel.setParameterValueById).toHaveBeenLastCalledWith("ParamMouthOpenY", 0.35);
+
+    controller.endStreamingSpeech();
+    expect(coreModel.setParameterValueById).toHaveBeenLastCalledWith("ParamMouthOpenY", 0);
+    coreModel.setParameterValueById.mockClear();
+    listeners.get("beforeModelUpdate")?.();
+    expect(coreModel.setParameterValueById).not.toHaveBeenCalledWith("ParamMouthOpenY", expect.anything());
+  });
+
+  it("closes a streaming mouth when speech is stopped or the scene is disposed", () => {
+    const { controller, coreModel, model } = createHarness();
+    controller.beginStreamingSpeech();
+    controller.setStreamingSpeechLevel(0.8);
+    controller.stopSpeech();
+    expect(coreModel.setParameterValueById).toHaveBeenLastCalledWith("ParamMouthOpenY", 0);
+    expect(model.stopSpeaking).toHaveBeenCalledOnce();
+
+    controller.beginStreamingSpeech();
+    controller.dispose();
+    expect(coreModel.setParameterValueById).toHaveBeenLastCalledWith("ParamMouthOpenY", 0);
+  });
+
   it("unsubscribes its model hook when disposed", () => {
     const { controller, model } = createHarness();
     controller.dispose();

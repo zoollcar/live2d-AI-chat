@@ -49,7 +49,10 @@ export class WebSpeechRecognitionProvider implements SpeechRecognitionProvider {
     };
     recognition.onaudiostart = () => log.debug("onaudiostart fired — mic is now capturing");
     recognition.onaudioend = () => log.debug("onaudioend fired — mic capture stopped");
-    recognition.onspeechstart = () => log.debug("onspeechstart fired — detected speech");
+    recognition.onspeechstart = () => {
+      log.debug("onspeechstart fired — detected speech");
+      callbacks.onSpeechStart?.();
+    };
     recognition.onspeechend = () => log.debug("onspeechend fired — speech paused");
     recognition.onnomatch = () => log.warn("onnomatch fired — no recognition match");
     recognition.onresult = (event) => {

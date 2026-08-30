@@ -35,12 +35,13 @@ describe("conversation persistence", () => {
       now: 100,
       messages: [
         { role: "system", content: "Stable prompt" },
-        { role: "user", content: "Show me the state" },
+        { role: "user", content: "Show me the state", inputMode: "voice" },
         {
           role: "assistant",
           content: "Done",
+          interrupted: true,
           reasoning: "Inspect the scene",
-          toolCalls: [{ name: "setState", input: { state: "happy" }, output: { ok: true } }],
+          toolCalls: [{ callId: "call-1", name: "setState", input: { state: "happy" }, output: { ok: true } }],
         },
       ],
     });
