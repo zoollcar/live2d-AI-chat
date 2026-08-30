@@ -92,9 +92,11 @@ export async function proxyChat(c: Context, config: ProxyConfig): Promise<Respon
   const resolved = resolveUpstreamOrError(c, config);
   if ("response" in resolved) return resolved.response;
 
+  let rawBody: string;
   let input: unknown;
   try {
-    input = await c.req.json();
+    rawBody = await c.req.text();
+    input = JSON.parse(rawBody);
   } catch {
     return c.json(apiError("invalid_json", "Request body must be valid JSON."), 400);
   }
@@ -106,7 +108,7 @@ export async function proxyChat(c: Context, config: ProxyConfig): Promise<Respon
 
   return fetchUpstream(c, config, resolved.upstream, "/chat/completions", {
     method: "POST",
-    body: JSON.stringify(parsed.data),
+    body: rawBody,
   });
 }
 

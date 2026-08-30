@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from "vitest";
-import { SceneController } from "./scene-controller";
+import { ActionDiscardedError, SceneController } from "./scene-controller";
 
 vi.mock("pixi-live2d-display-lipsyncpatch", () => ({
   MotionPriority: { NONE: 0, IDLE: 1, NORMAL: 2, FORCE: 3 },
@@ -116,6 +116,20 @@ describe("SceneController visual state", () => {
     expect(actionCalls.length).toBe(2); // wink (initial) + wave (after preempt)
     expect(actionCalls[1]![1]).toBe(1); // wave index
     expect(controller.snapshot().action).toBe("wave");
+  });
+
+  it("rejects queued actions discarded by a new batch", async () => {
+    const { controller, model } = createHarness();
+    const inFlight = controller.enqueueAction("wink");
+    const queued = controller.enqueueAction("think");
+    await flushMicrotasks();
+
+    const replacement = controller.preemptAndEnqueueAction("wave");
+
+    await expect(queued).rejects.toBeInstanceOf(ActionDiscardedError);
+    await expect(inFlight).resolves.toBeUndefined();
+    model.motion.mock.calls[1]![3].onFinish();
+    await expect(replacement).resolves.toBeUndefined();
   });
 
   it("switching state clears the action queue and runs the state's expression", async () => {

@@ -81,6 +81,22 @@ describe("Hono LLM proxy", () => {
     expect(new Headers(request?.[1]?.headers).get("authorization")).toBe("Bearer client-secret");
   });
 
+  it("forwards a validated chat request without reserializing it", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ id: "response" }));
+    const body = '{\n  "messages": [{"content": "Hi", "role": "user"}],\n  "model": "chat-model"\n}';
+    const response = await createApp(config).request("/api/llm/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-llm-base-url": "https://upstream.example/v1",
+      },
+      body,
+    });
+
+    expect(response.status).toBe(200);
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(body);
+  });
+
   it("stops the upstream request when the client disconnects", async () => {
     let upstreamSignal: AbortSignal | undefined;
     vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {

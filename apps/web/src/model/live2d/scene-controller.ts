@@ -34,6 +34,13 @@ interface QueuedAction {
   reject: (error: unknown) => void;
 }
 
+export class ActionDiscardedError extends Error {
+  constructor() {
+    super("Live2D action was discarded before it started.");
+    this.name = "ActionDiscardedError";
+  }
+}
+
 const stateParameterDefaults = [
   { id: "Param31", value: 0 },
   { id: "ParamEyeBallX", value: 0 },
@@ -302,7 +309,7 @@ export class SceneController {
   }
 
   private discardQueuedActions(): void {
-    for (const queued of this.actionQueue.splice(0)) queued.resolve();
+    for (const queued of this.actionQueue.splice(0)) queued.reject(new ActionDiscardedError());
   }
 
   private applyDecorations(): void {
