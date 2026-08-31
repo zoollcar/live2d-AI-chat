@@ -10,17 +10,22 @@ export function prefixAgentStatus(
   snapshot: SceneSnapshot,
   now = new Date(),
 ): string {
+  return `${buildAgentStatus(snapshot, now)}
+
+<user_message>
+${userMessage}
+</user_message>`;
+}
+
+/** Current application state for persistent realtime sessions without a text-message prefix. */
+export function buildAgentStatus(snapshot: SceneSnapshot, now = new Date()): string {
   return `<agent_status>
 current_time: ${formatLocalTime(now)}
 character_state: ${snapshot.state}
 decorations: ${JSON.stringify(snapshot.decorations)}
 active_action: ${snapshot.action ?? "none"}
 stage_layout: ${snapshot.layout}
-</agent_status>
-
-<user_message>
-${userMessage}
-</user_message>`;
+</agent_status>`;
 }
 
 function formatLocalTime(date: Date): string {

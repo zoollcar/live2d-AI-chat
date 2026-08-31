@@ -1,7 +1,12 @@
 import type { AppSettings } from "@live2d-chat/shared";
 
 export const defaultSettings: AppSettings = {
-  version: 2,
+  version: 3,
+  voiceRoute: "classic",
+  voiceInteraction: {
+    handsFree: false,
+    allowVoiceInterruption: true,
+  },
   llm: {
     transport: "proxy",
     baseUrl: "https://api.openai.com/v1",
@@ -30,6 +35,15 @@ export const defaultSettings: AppSettings = {
     language: "en-US",
     rate: 1,
     pitch: 1,
+  },
+  realtime: {
+    provider: "google",
+    google: {
+      modelId: "gemini-3.1-flash-live-preview",
+      voiceName: "Kore",
+      apiKey: "",
+      rememberApiKey: false,
+    },
   },
   subtitlesEnabled: true,
 };

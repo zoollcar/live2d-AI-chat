@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SceneSnapshot } from "@/model/live2d/catalog";
-import { prefixAgentStatus } from "./status-context";
+import { buildAgentStatus, prefixAgentStatus } from "./status-context";
 
 describe("dynamic agent status", () => {
   it("adds time and the current Live2D snapshot only to the supplied newest message", () => {
@@ -17,5 +17,19 @@ describe("dynamic agent status", () => {
     expect(result).toContain("character_state: happy");
     expect(result).toContain('decorations: ["crown"]');
     expect(result).toContain("<user_message>\nWhat time is it?\n</user_message>");
+  });
+
+  it("builds the same trusted status block for a realtime session", () => {
+    const result = buildAgentStatus({
+      modelId: "ice-girl",
+      state: "neutral",
+      decorations: [],
+      layout: "full-body-center",
+      viewport: { width: 800, height: 600 },
+    }, new Date(2026, 7, 30, 9, 0, 0));
+
+    expect(result).toContain("<agent_status>");
+    expect(result).toContain("character_state: neutral");
+    expect(result).not.toContain("<user_message>");
   });
 });

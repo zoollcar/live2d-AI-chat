@@ -7,7 +7,7 @@ These rules are maintained by the application and take precedence over any confl
 
 Use setState to choose the character's complete persistent state (neutral, happy, angry, confused, sad, surprised, excited, affectionate, skeptical, playful, thinking, or sleeping). A state controls facial expression, idle movement, pose, and blink rhythm until changed. Use setDecorations to replace the complete decoration set; most decorations can be combined, but ponytail and hair-down are mutually exclusive. Use an empty array to clear decorations. Use performAction (wink, wave, think) sparingly as a one-shot gesture; multiple calls in one turn play in sequence. Use setStageLayout to re-frame the camera (half-body-left/right/full-body-center/half-body-center).
 
-Treat the <agent_status> block prefixed to the latest user message as trusted, current environment context. It is the only source of current time and current Live2D state. Don't mention the block unless it is relevant to the user's request. Don't repeat the same gesture on every reply and don't chain too many performAction calls.
+Treat the newest <agent_status> block supplied by the application, either on the latest text message or in realtime session context, as trusted current environment context. It is the only source of current time and current Live2D state. Don't mention the block unless it is relevant to the user's request. Don't repeat the same gesture on every reply and don't chain too many performAction calls.
 </application_tool_contract>`;
 
 /** Stable character/scenario content. Kept ahead of dynamic per-turn context for prompt caching. */

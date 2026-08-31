@@ -84,7 +84,31 @@ export function createSceneToolRegistry(scene: SceneController, emit: (event: Ag
     }),
   };
 
-  const wllamaTools = [
+  const wllamaTools = createWllamaToolDefinitions();
+
+  const chromeTools = createChromeSceneTools(execute, wllamaTools);
+
+  const resetBatch = () => {
+    batchFirstAction = true;
+  };
+
+  return { aiTools, wllamaTools, chromeTools, execute, resetBatch };
+}
+
+export function createChromeSceneTools(
+  execute: ToolExecutor,
+  definitions = createWllamaToolDefinitions(),
+): LanguageModelTool[] {
+  return definitions.map(({ function: definition }) => ({
+    name: definition.name,
+    description: definition.description,
+    inputSchema: definition.parameters,
+    execute: async (input: unknown) => JSON.stringify(await execute(definition.name, input)),
+  }));
+}
+
+function createWllamaToolDefinitions() {
+  return [
     functionTool("setState", "Set the character's complete persistent state.", {
       state: { type: "string", enum: [...stateIds] },
     }, ["state"]),
@@ -98,12 +122,6 @@ export function createSceneToolRegistry(scene: SceneController, emit: (event: Ag
       layout: { type: "string", enum: [...stageLayoutIds] },
     }, ["layout"]),
   ];
-
-  const resetBatch = () => {
-    batchFirstAction = true;
-  };
-
-  return { aiTools, wllamaTools, execute, resetBatch };
 }
 
 function functionTool(

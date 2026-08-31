@@ -103,6 +103,9 @@ importers:
         specifier: ^5.0.15
         version: 5.0.15(@types/react@19.2.18)(react@19.2.8)
     devDependencies:
+      '@types/dom-chromium-ai':
+        specifier: ^0.0.17
+        version: 0.0.17
       '@types/react':
         specifier: ^19.2.18
         version: 19.2.18
@@ -1109,6 +1112,9 @@ packages:
 
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
+
+  '@types/dom-chromium-ai@0.0.17':
+    resolution: {integrity: sha512-UnSAIVKONaY2vTAM4TkPpwdKeGgg3tPCwNP3KxR+U8bLYC2rQU7UrgW9LIVx0B02dKZxuPA6a0Q5wvyW5Rk6nw==}
 
   '@types/earcut@2.1.4':
     resolution: {integrity: sha512-qp3m9PPz4gULB9MhjGID7wpo3gJ4bTGXm7ltNDsmOvsPduTeHp8wSW9YckBj3mljeOh4F0m2z/0JKAALRKbmLQ==}
@@ -3062,6 +3068,8 @@ snapshots:
   '@types/css-font-loading-module@0.0.12': {}
 
   '@types/deep-eql@4.0.2': {}
+
+  '@types/dom-chromium-ai@0.0.17': {}
 
   '@types/earcut@2.1.4': {}
 

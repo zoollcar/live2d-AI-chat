@@ -20,7 +20,7 @@ export const apiErrorSchema = z.object({
 
 export type ApiError = z.infer<typeof apiErrorSchema>;
 
-export type LlmTransport = "proxy" | "direct" | "local";
+export type LlmTransport = "proxy" | "direct" | "local" | "chrome";
 
 export interface LlmSettings {
   transport: LlmTransport;
@@ -40,6 +40,11 @@ export interface SttSettings {
   rememberApiKey: boolean;
   modelId: string;
   language: string;
+  /**
+   * Compatibility mirror for providers that still configure their native
+   * recognition session from STT settings. User-facing control lives in
+   * `AppSettings.voiceInteraction.handsFree`.
+   */
   continuous: boolean;
 }
 
@@ -57,11 +62,35 @@ export interface TtsSettings {
   pitch: number;
 }
 
+export type VoiceRoute = "classic" | "realtime";
+
+export type RealtimeProviderId = "google";
+
+export interface GoogleRealtimeSettings {
+  modelId: string;
+  voiceName: string;
+  apiKey: string;
+  rememberApiKey: boolean;
+}
+
+export interface RealtimeSettings {
+  provider: RealtimeProviderId;
+  google: GoogleRealtimeSettings;
+}
+
+export interface VoiceInteractionSettings {
+  handsFree: boolean;
+  allowVoiceInterruption: boolean;
+}
+
 export interface AppSettings {
-  version: 2;
+  version: 3;
+  voiceRoute: VoiceRoute;
+  voiceInteraction: VoiceInteractionSettings;
   llm: LlmSettings;
   stt: SttSettings;
   tts: TtsSettings;
+  realtime: RealtimeSettings;
   subtitlesEnabled: boolean;
 }
 

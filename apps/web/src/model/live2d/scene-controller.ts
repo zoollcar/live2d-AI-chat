@@ -74,6 +74,8 @@ export class SceneController {
   private actionQueue: QueuedAction[] = [];
   private actionQueueDraining = false;
   private cancelActiveAction?: () => void;
+  private streamingSpeechActive = false;
+  private streamingSpeechLevel = 0;
 
   private blinkPhase: BlinkPhase = "open";
   private blinkPhaseStartMs = performance.now();
@@ -85,6 +87,9 @@ export class SceneController {
     // Persistent decoration/state values are synchronized when their setters
     // run. Only animation that genuinely changes over time belongs here.
     this.applyBlink(coreModel);
+    if (this.streamingSpeechActive) {
+      coreModel.setParameterValueById("ParamMouthOpenY", this.streamingSpeechLevel);
+    }
   };
 
   constructor(
@@ -230,8 +235,33 @@ export class SceneController {
     // Body motion is provided by the current state loop.
   }
 
+  /** Begin mouth control for streaming PCM played outside the Live2D SDK. */
+  beginStreamingSpeech() {
+    if (this.disposed || this.streamingSpeechActive) return;
+    this.streamingSpeechActive = true;
+    this.streamingSpeechLevel = 0;
+  }
+
+  /** Update the normalized realtime output level applied on the next model frame. */
+  setStreamingSpeechLevel(level: number) {
+    if (this.disposed || !this.streamingSpeechActive) return;
+    this.streamingSpeechLevel = Number.isFinite(level)
+      ? Math.max(0, Math.min(1, level))
+      : 0;
+  }
+
+  /** Stop streaming mouth control and immediately close the mouth. */
+  endStreamingSpeech() {
+    this.streamingSpeechActive = false;
+    this.streamingSpeechLevel = 0;
+    if (this.disposed) return;
+    const coreModel = this.model.internalModel.coreModel as CubismCoreModel;
+    coreModel.setParameterValueById("ParamMouthOpenY", 0);
+  }
+
   stopSpeech() {
     if (this.disposed) return;
+    this.endStreamingSpeech();
     ++this.playbackGeneration;
     delete this.snapshotValue.action;
     this.model.stopSpeaking();
@@ -240,6 +270,7 @@ export class SceneController {
 
   dispose() {
     if (this.disposed) return;
+    this.endStreamingSpeech();
     this.disposed = true;
     this.discardQueuedActions();
     ++this.playbackGeneration;

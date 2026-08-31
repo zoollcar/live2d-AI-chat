@@ -12,15 +12,24 @@ import type { SceneController } from "@/model/live2d/scene-controller";
  * expressions all mutate the same Live2D model and their order is observable.
  */
 export interface ToolCallRecord {
+  /** Provider call id used to correlate and de-duplicate realtime tool calls. */
+  callId?: string;
   name: string;
   input: unknown;
   output?: unknown;
   error?: string;
+  canceled?: boolean;
 }
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
+  /** How a user message entered the conversation. Omitted for legacy data. */
+  inputMode?: "text" | "voice";
+  /** The native-audio provider could not produce a transcript for this turn. */
+  transcriptUnavailable?: boolean;
+  /** The assistant reply ended before completion but its received content is retained. */
+  interrupted?: boolean;
   /**
    * Accumulated reasoning text for this assistant turn, populated from the
    * remote runtime's `reasoning-delta` stream events. Only present when the

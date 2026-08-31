@@ -1,9 +1,19 @@
-import type { AppSettings, LlmSettings, SttSettings, TtsSettings } from "@live2d-chat/shared";
+import type {
+  AppSettings,
+  GoogleRealtimeSettings,
+  LlmSettings,
+  RealtimeProviderId,
+  RealtimeSettings,
+  SttSettings,
+  TtsSettings,
+  VoiceInteractionSettings,
+  VoiceRoute,
+} from "@live2d-chat/shared";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { defaultSettings } from "./defaults";
 
-type SecretSection = "llm" | "stt" | "tts";
+type SecretSection = "llm" | "stt" | "tts" | "realtime";
 
 const secretKey = (section: SecretSection) => `live2d-chat:${section}:api-key`;
 
@@ -24,11 +34,36 @@ interface SettingsStore {
   settings: AppSettings;
   hydrated: boolean;
   hydrateSecrets(): void;
+  setVoiceRoute(route: VoiceRoute): void;
+  setRealtimeProvider(provider: RealtimeProviderId): void;
+  updateVoiceInteraction(patch: Partial<VoiceInteractionSettings>): void;
   updateLlm(patch: Partial<LlmSettings>): void;
   updateStt(patch: Partial<SttSettings>): void;
   updateTts(patch: Partial<TtsSettings>): void;
+  updateRealtime(patch: Partial<GoogleRealtimeSettings>): void;
   setSubtitlesEnabled(enabled: boolean): void;
   reset(): void;
+}
+
+type LegacyRealtimeSettings = Omit<Partial<RealtimeSettings>, "google"> & {
+  modelId?: string;
+  voice?: string;
+  voiceName?: string;
+  apiKey?: string;
+  rememberApiKey?: boolean;
+  google?: Partial<GoogleRealtimeSettings>;
+};
+
+type PersistedSettings = Partial<Omit<AppSettings, "llm" | "stt" | "tts" | "realtime" | "voiceInteraction">> & {
+  llm?: Partial<LlmSettings>;
+  stt?: Partial<SttSettings>;
+  tts?: Partial<TtsSettings>;
+  realtime?: LegacyRealtimeSettings;
+  voiceInteraction?: Partial<VoiceInteractionSettings>;
+};
+
+interface PersistedSettingsState {
+  settings?: PersistedSettings;
 }
 
 // Recognise URLs that point at the local Hono proxy itself rather than an
@@ -41,6 +76,72 @@ interface SettingsStore {
 function isLocalProxyUrl(url: string): boolean {
   const trimmed = url.trim().replace(/\/+$/, "");
   return trimmed === "/api/llm/v1" || trimmed.startsWith("/api/llm/");
+}
+
+function normalizePersistedRealtime(saved?: LegacyRealtimeSettings): RealtimeSettings {
+  const google = saved?.google ?? {};
+  return {
+    provider: "google",
+    google: {
+      ...defaultSettings.realtime.google,
+      ...google,
+      modelId: google.modelId
+        ?? saved?.modelId
+        ?? defaultSettings.realtime.google.modelId,
+      voiceName: google.voiceName
+        ?? saved?.voiceName
+        ?? saved?.voice
+        ?? defaultSettings.realtime.google.voiceName,
+      apiKey: "",
+      rememberApiKey: google.rememberApiKey
+        ?? saved?.rememberApiKey
+        ?? defaultSettings.realtime.google.rememberApiKey,
+    },
+  };
+}
+
+/**
+ * Upgrade the persisted payload before Zustand merges it with current
+ * defaults. Exported for focused migration tests; callers should still let the
+ * persist middleware own storage reads and writes.
+ */
+export function migratePersistedSettings(persisted: unknown, version: number): PersistedSettingsState {
+  const state = (persisted ?? {}) as PersistedSettingsState;
+  const saved = state.settings;
+  if (!saved) return state;
+
+  let llm = saved.llm;
+  if (version < 3 && llm?.transport === "proxy" && isLocalProxyUrl(llm.baseUrl ?? "")) {
+    llm = {
+      ...llm,
+      baseUrl: "https://api.openai.com/v1",
+      modelId: llm.modelId?.trim() ? llm.modelId : "gpt-4.1-mini",
+    };
+  }
+
+  if (version >= 5) {
+    return llm === saved.llm ? state : { ...state, settings: { ...saved, llm } };
+  }
+
+  const handsFree = saved.voiceInteraction?.handsFree
+    ?? saved.stt?.continuous
+    ?? defaultSettings.voiceInteraction.handsFree;
+  return {
+    ...state,
+    settings: {
+      ...saved,
+      llm,
+      version: 3,
+      voiceRoute: saved.voiceRoute === "realtime" ? "realtime" : "classic",
+      voiceInteraction: {
+        handsFree,
+        allowVoiceInterruption: saved.voiceInteraction?.allowVoiceInterruption
+          ?? defaultSettings.voiceInteraction.allowVoiceInterruption,
+      },
+      stt: saved.stt ? { ...saved.stt, continuous: handsFree } : saved.stt,
+      realtime: normalizePersistedRealtime(saved.realtime),
+    },
+  };
 }
 
 export const useSettingsStore = create<SettingsStore>()(
@@ -57,7 +158,39 @@ export const useSettingsStore = create<SettingsStore>()(
             llm: { ...settings.llm, apiKey: readSecret("llm", settings.llm.rememberApiKey) },
             stt: { ...settings.stt, apiKey: readSecret("stt", settings.stt.rememberApiKey) },
             tts: { ...settings.tts, apiKey: readSecret("tts", settings.tts.rememberApiKey) },
+            realtime: {
+              ...settings.realtime,
+              google: {
+                ...settings.realtime.google,
+                apiKey: readSecret("realtime", settings.realtime.google.rememberApiKey),
+              },
+            },
           },
+        });
+      },
+      setVoiceRoute(voiceRoute) {
+        set((state) => ({ settings: { ...state.settings, voiceRoute } }));
+      },
+      setRealtimeProvider(provider) {
+        set((state) => ({
+          settings: {
+            ...state.settings,
+            realtime: { ...state.settings.realtime, provider },
+          },
+        }));
+      },
+      updateVoiceInteraction(patch) {
+        set((state) => {
+          const voiceInteraction = { ...state.settings.voiceInteraction, ...patch };
+          return {
+            settings: {
+              ...state.settings,
+              voiceInteraction,
+              stt: patch.handsFree === undefined
+                ? state.settings.stt
+                : { ...state.settings.stt, continuous: voiceInteraction.handsFree },
+            },
+          };
         });
       },
       updateLlm(patch) {
@@ -72,7 +205,15 @@ export const useSettingsStore = create<SettingsStore>()(
         if (patch.apiKey !== undefined || patch.rememberApiKey !== undefined) {
           writeSecret("stt", next.apiKey, next.rememberApiKey);
         }
-        set((state) => ({ settings: { ...state.settings, stt: next } }));
+        set((state) => ({
+          settings: {
+            ...state.settings,
+            stt: next,
+            voiceInteraction: patch.continuous === undefined
+              ? state.settings.voiceInteraction
+              : { ...state.settings.voiceInteraction, handsFree: next.continuous },
+          },
+        }));
       },
       updateTts(patch) {
         const next = { ...get().settings.tts, ...patch };
@@ -81,13 +222,28 @@ export const useSettingsStore = create<SettingsStore>()(
         }
         set((state) => ({ settings: { ...state.settings, tts: next } }));
       },
+      updateRealtime(patch) {
+        const google = {
+          ...get().settings.realtime.google,
+          ...patch,
+        };
+        if (patch.apiKey !== undefined || patch.rememberApiKey !== undefined) {
+          writeSecret("realtime", google.apiKey, google.rememberApiKey);
+        }
+        set((state) => ({
+          settings: {
+            ...state.settings,
+            realtime: { provider: "google", google },
+          },
+        }));
+      },
       setSubtitlesEnabled(enabled) {
         set((state) => ({
           settings: { ...state.settings, subtitlesEnabled: enabled },
         }));
       },
       reset() {
-        for (const section of ["llm", "stt", "tts"] as const) {
+        for (const section of ["llm", "stt", "tts", "realtime"] as const) {
           localStorage.removeItem(secretKey(section));
           sessionStorage.removeItem(secretKey(section));
         }
@@ -96,54 +252,44 @@ export const useSettingsStore = create<SettingsStore>()(
     }),
     {
       name: "live2d-chat:settings:v2",
-      // Bumped from 2 → 3 so the `migrate` below runs against any state
-      // persisted by the previous release. The previous version stored
-      // `/api/llm/v1` (the local proxy URL) as `baseUrl` in proxy mode
-      // because the old "Built-in Hono proxy" preset had that value;
-      // that's no longer a valid upstream and needs to be replaced.
-      version: 3,
+      // Keep the established key so existing installations are discovered.
+      // Version 5 nests provider-specific settings under realtime.google while
+      // keeping the established storage key and migrating the earlier flat v4.
+      version: 5,
       partialize: ({ settings }) => ({
         settings: {
           ...settings,
           llm: { ...settings.llm, apiKey: "" },
           stt: { ...settings.stt, apiKey: "" },
           tts: { ...settings.tts, apiKey: "" },
+          realtime: {
+            ...settings.realtime,
+            google: { ...settings.realtime.google, apiKey: "" },
+          },
         },
       }),
-      migrate: (persisted, version) => {
-        // Local-proxy URLs in proxy mode were valid in the previous
-        // release's UI but no longer resolve to a real upstream. Replace
-        // with the same default the rest of the app uses (OpenAI) so the
-        // user lands on a working provider without having to manually
-        // re-select one.
-        const state = persisted as Partial<SettingsStore> | undefined;
-        const llm = state?.settings?.llm;
-        if (version < 3 && llm && llm.transport === "proxy" && isLocalProxyUrl(llm.baseUrl ?? "")) {
-          return {
-            ...state,
-            settings: {
-              ...state?.settings,
-              llm: {
-                ...llm,
-                baseUrl: "https://api.openai.com/v1",
-                modelId: llm.modelId?.trim() ? llm.modelId : "gpt-4.1-mini",
-              },
-            },
-          } as SettingsStore;
-        }
-        return state as SettingsStore;
-      },
+      migrate: migratePersistedSettings,
       merge: (persisted, current) => {
-        const saved = (persisted as Partial<SettingsStore>)?.settings;
+        const saved = (persisted as PersistedSettingsState)?.settings;
+        const handsFree = saved?.voiceInteraction?.handsFree
+          ?? saved?.stt?.continuous
+          ?? defaultSettings.voiceInteraction.handsFree;
         return {
           ...current,
           settings: {
             ...defaultSettings,
             ...saved,
+            voiceRoute: saved?.voiceRoute === "realtime" ? "realtime" : "classic",
             llm: { ...defaultSettings.llm, ...saved?.llm },
-            stt: { ...defaultSettings.stt, ...saved?.stt },
+            stt: { ...defaultSettings.stt, ...saved?.stt, continuous: handsFree },
             tts: { ...defaultSettings.tts, ...saved?.tts },
-            version: 2,
+            realtime: normalizePersistedRealtime(saved?.realtime),
+            voiceInteraction: {
+              ...defaultSettings.voiceInteraction,
+              ...saved?.voiceInteraction,
+              handsFree,
+            },
+            version: 3,
           },
         };
       },

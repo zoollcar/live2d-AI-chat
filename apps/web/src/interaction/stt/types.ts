@@ -1,4 +1,6 @@
 export interface RecognitionCallbacks {
+  /** Earliest provider signal that the user has started speaking. */
+  onSpeechStart?(): void;
   onInterim(text: string): void;
   onFinal(text: string): void;
   onStatus(status: "idle" | "listening" | "processing"): void;
