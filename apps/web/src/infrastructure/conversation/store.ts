@@ -15,7 +15,7 @@ import {
   loadConversationDatabase,
   saveActiveConversationId,
   saveConversation,
-  saveConversations,
+  saveConversationImport,
 } from "./indexed-db";
 
 export interface NewConversationInput {
@@ -259,14 +259,21 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
       return conversationSchema.parse({ ...conversation, id });
     });
     if (imported.length === 0) return 0;
-    await get().flushActive();
-    const conversations = sortConversations([...get().conversations, ...imported]);
-    set({ conversations, activeConversationId: imported[0].id });
+    const previousState = get();
+    const active = previousState.conversations.find((conversation) =>
+      conversation.id === previousState.activeConversationId);
     try {
-      await Promise.all([saveConversations(imported), saveActiveConversationId(imported[0].id)]);
-      set({ storageError: undefined });
+      await flushConversation(active);
+      await saveConversationImport(imported, imported[0].id);
+      set({
+        conversations: sortConversations([...previousState.conversations, ...imported]),
+        activeConversationId: imported[0].id,
+        storageError: undefined,
+      });
     } catch (error) {
-      set({ storageError: error instanceof Error ? error.message : "Unable to import conversations." });
+      const message = error instanceof Error ? error.message : "Unable to import conversations.";
+      set({ storageError: message });
+      throw error instanceof Error ? error : new Error(message);
     }
     return imported.length;
   },

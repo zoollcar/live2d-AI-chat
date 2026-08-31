@@ -14,6 +14,8 @@ import {
 } from "@/agent/chrome-prompt-api";
 import { normalizeBaseUrl } from "@/infrastructure/config/defaults";
 import { useSettingsStore } from "@/infrastructure/config/store";
+import { createExtensionFetch, extensionBridge } from "@/infrastructure/extension/bridge-client";
+import { useExtensionStore } from "@/infrastructure/extension/store";
 import { useCharacterStore } from "@/infrastructure/character/store";
 import { useConversationStore } from "@/infrastructure/conversation/store";
 import { fetchGoogleRealtimeModels, type GoogleRealtimeModel } from "@/interaction/realtime";
@@ -92,10 +94,7 @@ interface LlmProvider {
   baseUrl: string;
   models: ModelOption[];
 }
-// Built-in default whitelist. Mirrors the env var on the Hono proxy and is
-// used as a fallback when the proxy is unreachable so the settings UI still
-// renders something useful (e.g. during local development without the API).
-const defaultProxyProviders: LlmProvider[] = [
+const cloudProviders: LlmProvider[] = [
   { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", models: openAiLlmModels },
   { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", models: openRouterLlmModels },
   { id: "minimax-cn", label: "MiniMax (China)", baseUrl: "https://api.minimaxi.com/v1", models: minimaxCnLlmModels },
@@ -140,6 +139,16 @@ const defaultDirectProviders: LlmProvider[] = [
     models: [],
   },
 ];
+const remoteProviders = [...cloudProviders, ...defaultDirectProviders];
+
+function bridgeProviderFor(baseUrl: string) {
+  const host = new URL(normalizeBaseUrl(baseUrl)).hostname.toLowerCase();
+  if (host === "api.openai.com") return "openai" as const;
+  if (host.endsWith("openrouter.ai")) return "openrouter" as const;
+  if (host.includes("minimax")) return "minimax" as const;
+  if (host.endsWith("googleapis.com")) return "google" as const;
+  return "openai-compatible" as const;
+}
 function findLlmProvider(providers: LlmProvider[], baseUrl: string): LlmProvider | undefined {
   const normalized = baseUrl.trim().replace(/\/+$/, "");
   return providers.find((provider) => provider.baseUrl === normalized);
@@ -227,6 +236,9 @@ export function SettingsPanel({
     updateStt,
     updateTts,
     updateRealtime,
+    updateContent,
+    updateContentSecret,
+    updateCapabilities,
     setSubtitlesEnabled,
     reset,
   } = useSettingsStore();
@@ -260,8 +272,8 @@ export function SettingsPanel({
   const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [charactersOpen, setCharactersOpen] = useState(false);
-  const [proxyProviders, setProxyProviders] = useState<LlmProvider[]>(defaultProxyProviders);
   const [chromeAvailability, setChromeAvailability] = useState<ChromePromptApiAvailability>("unsupported");
+  const extensionState = useExtensionStore();
   const llmAbortRef = useRef<AbortController | undefined>(undefined);
   const voiceAbortRef = useRef<AbortController | undefined>(undefined);
 
@@ -289,8 +301,7 @@ export function SettingsPanel({
         value: model.id,
       }));
     }
-    const providers = effectiveLlm.transport === "proxy" ? proxyProviders : defaultDirectProviders;
-    const provider = findLlmProvider(providers, effectiveLlm.baseUrl);
+    const provider = findLlmProvider(remoteProviders, effectiveLlm.baseUrl);
     // Only use provider preset models when the user hasn't already pulled a
     // fresh list from the live API for this exact baseUrl. Once they hit
     // the magnifying glass and the fetch succeeds, the dropdown reflects
@@ -302,7 +313,7 @@ export function SettingsPanel({
       return discoverState.models.map((model) => ({ label: model, value: model }));
     }
     return presets.map((preset) => ({ label: preset.label, value: preset.value }));
-  }, [discoverState, effectiveLlm.baseUrl, effectiveLlm.transport, proxyProviders]);
+  }, [discoverState, effectiveLlm.baseUrl, effectiveLlm.transport]);
 
   useEffect(() => {
     const apiKey = settings.realtime.google.apiKey.trim();
@@ -341,11 +352,13 @@ export function SettingsPanel({
   useEffect(() => {
     if (!open) return;
     let active = true;
-    void getChromePromptApiAvailability().then((availability) => {
+    void getChromePromptApiAvailability({
+      inspectImage: settings.capabilities.vision !== "disabled",
+    }).then((availability) => {
       if (active) setChromeAvailability(availability);
     });
     return () => { active = false; };
-  }, [open]);
+  }, [open, settings.capabilities.vision]);
 
   const currentVoices = localVoices[settings.tts.language] || localVoices["en-US"];
   const filteredBrowserVoices = useMemo(() => {
@@ -403,34 +416,6 @@ export function SettingsPanel({
   }, []);
 
   useEffect(() => {
-    if (!open) return;
-    let active = true;
-    void fetch("/api/llm/upstreams")
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return (await response.json()) as { upstreams?: Array<{ id: string; baseUrl: string }> };
-      })
-      .then((payload) => {
-        if (!active || !payload.upstreams) return;
-        // Merge server-side whitelist with the client-side label/model presets.
-        // Unknown upstream ids fall back to a generic entry so the UI still
-        // renders them.
-        const merged = payload.upstreams.map<LlmProvider>((item) => {
-          const preset = defaultProxyProviders.find((provider) => provider.id === item.id);
-          return {
-            id: item.id,
-            label: preset?.label ?? item.id,
-            baseUrl: item.baseUrl,
-            models: preset?.models ?? [],
-          };
-        });
-        if (merged.length > 0) setProxyProviders(merged);
-      })
-      .catch(() => undefined);
-    return () => { active = false; };
-  }, [open]);
-
-  useEffect(() => {
     if (!open || settings.tts.provider !== "browser-speech" || !("speechSynthesis" in window)) return;
     const updateVoices = () => setBrowserVoices([...window.speechSynthesis.getVoices()]);
     updateVoices();
@@ -455,7 +440,11 @@ export function SettingsPanel({
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setGoogleVoiceState((current) => ({ status: "loading", voices: current.voices }));
-      void fetchGoogleCloudVoices(apiKey, settings.tts.language, controller.signal)
+      void fetchGoogleCloudVoices({
+        apiKey,
+        language: settings.tts.language,
+        transport: settings.tts.transport,
+      }, controller.signal)
         .then((voices) => {
           setGoogleVoiceState({ status: "success", voices });
           updateTts({ voice: voices[0]?.name || "" });
@@ -474,7 +463,14 @@ export function SettingsPanel({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [open, settings.tts.apiKey, settings.tts.language, settings.tts.provider, updateTts]);
+  }, [
+    open,
+    settings.tts.apiKey,
+    settings.tts.language,
+    settings.tts.provider,
+    settings.tts.transport,
+    updateTts,
+  ]);
 
   if (!open) return null;
 
@@ -524,12 +520,20 @@ export function SettingsPanel({
     }
     setConnectionStatus("Sending a test request…");
     try {
-      const viaProxy = effectiveLlm.transport === "proxy";
-      const baseUrl = viaProxy ? "/api/llm/v1" : normalizeBaseUrl(effectiveLlm.baseUrl);
+      const baseUrl = normalizeBaseUrl(effectiveLlm.baseUrl);
+      const viaExtension = effectiveLlm.transport === "extension";
       const headers: Record<string, string> = { "content-type": "application/json" };
-      if (effectiveLlm.apiKey) headers.authorization = `Bearer ${effectiveLlm.apiKey}`;
-      if (viaProxy) headers["X-LLM-Base-URL"] = normalizeBaseUrl(effectiveLlm.baseUrl);
-      const response = await fetch(`${baseUrl}/chat/completions`, {
+      if (!viaExtension && effectiveLlm.apiKey) headers.authorization = `Bearer ${effectiveLlm.apiKey}`;
+      const fetcher = viaExtension
+        ? createExtensionFetch({
+            operation: "chat",
+            provider: bridgeProviderFor(baseUrl),
+            baseUrl,
+            apiKey: effectiveLlm.apiKey,
+            mediaType: "application/json",
+          })
+        : fetch;
+      const response = await fetcher(`${baseUrl}/chat/completions`, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -580,7 +584,6 @@ export function SettingsPanel({
       setConnectionStatus("Local models are managed from the download list, not fetched from an API.");
       return;
     }
-    const viaProxy = effectiveLlm.transport === "proxy";
     // Capture the URL we're fetching from so a Provider/Transport change
     // mid-flight can't apply the stale result to the new baseUrl. The
     // guard below ignores responses whose `baseUrl` no longer matches.
@@ -588,11 +591,19 @@ export function SettingsPanel({
     setDiscoverState({ status: "loading" });
     setConnectionStatus("Fetching the model list…");
     try {
-      const baseUrl = viaProxy ? "/api/llm/v1" : normalizeBaseUrl(targetBaseUrl);
+      const baseUrl = normalizeBaseUrl(targetBaseUrl);
+      const viaExtension = effectiveLlm.transport === "extension";
       const headers: Record<string, string> = {};
-      if (effectiveLlm.apiKey) headers.authorization = `Bearer ${effectiveLlm.apiKey}`;
-      if (viaProxy) headers["X-LLM-Base-URL"] = normalizeBaseUrl(targetBaseUrl);
-      const response = await fetch(`${baseUrl}/models`, { headers });
+      if (!viaExtension && effectiveLlm.apiKey) headers.authorization = `Bearer ${effectiveLlm.apiKey}`;
+      const fetcher = viaExtension
+        ? createExtensionFetch({
+            operation: "models",
+            provider: bridgeProviderFor(baseUrl),
+            baseUrl,
+            apiKey: effectiveLlm.apiKey,
+          })
+        : fetch;
+      const response = await fetcher(`${baseUrl}/models`, { headers });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const payload = (await response.json()) as { data?: Array<{ id?: string }> };
       const ids = payload.data?.flatMap((model) => (model.id ? [model.id] : [])) || [];
@@ -668,6 +679,21 @@ export function SettingsPanel({
             <span className="status-copy">{visibleMessageCount} message{visibleMessageCount === 1 ? "" : "s"} in this chat</span>
           </div>
           <button onClick={() => setHistoryOpen(true)}>View chat history</button>
+        </section>
+
+        <section className="settings-section history-setting" aria-label="Browser extension">
+          <div>
+            <h3>Companion extension</h3>
+            <span className="status-copy">
+              {extensionState.status === "ready"
+                ? `Connected · v${extensionState.extensionVersion ?? "unknown"}`
+                : extensionState.status === "not-detected"
+                  ? "Not detected or this site is not connected"
+                  : extensionState.status.replace(/-/g, " ")}
+            </span>
+            {extensionState.error ? <span className="status-copy">{extensionState.error}</span> : null}
+          </div>
+          <button onClick={() => void extensionBridge.connect().catch(() => undefined)}>Recheck</button>
         </section>
 
         <section className="settings-section history-setting">
@@ -747,21 +773,11 @@ export function SettingsPanel({
                   } else if (transport === "local") {
                     nextModelId = localModelPresets[0].id;
                   } else if (effectiveLlm.transport === "local" || effectiveLlm.transport === "chrome") {
-                    if (transport === "proxy") {
-                      nextBaseUrl = proxyProviders[0]?.baseUrl ?? defaultDirectProviders[0].baseUrl;
-                      nextModelId = proxyProviders[0]?.models[0]?.value
-                        ?? defaultDirectProviders[0].models[0]?.value
-                        ?? "";
-                    } else {
-                      nextBaseUrl = defaultDirectProviders[0].baseUrl;
-                      nextModelId = defaultDirectProviders[0].models[0]?.value ?? "";
-                    }
-                  } else if (transport === "proxy" && !findLlmProvider(proxyProviders, effectiveLlm.baseUrl)) {
-                    nextBaseUrl = proxyProviders[0]?.baseUrl ?? effectiveLlm.baseUrl;
-                    nextModelId = proxyProviders[0]?.models[0]?.value ?? "";
-                  } else if (transport === "direct" && !findLlmProvider(defaultDirectProviders, effectiveLlm.baseUrl)) {
-                    nextBaseUrl = defaultDirectProviders[0].baseUrl;
-                    nextModelId = defaultDirectProviders[0].models[0]?.value ?? "";
+                    nextBaseUrl = cloudProviders[0].baseUrl;
+                    nextModelId = cloudProviders[0].models[0]?.value ?? "";
+                  } else if (!findLlmProvider(remoteProviders, effectiveLlm.baseUrl)) {
+                    nextBaseUrl = cloudProviders[0].baseUrl;
+                    nextModelId = cloudProviders[0].models[0]?.value ?? "";
                   }
                   updateActiveConversationLlm({
                     transport,
@@ -774,8 +790,8 @@ export function SettingsPanel({
                   setDiscoverState({ status: "idle" });
                   setConnectionStatus("");
                 }}>
-                  <option value="proxy">Built-in Hono proxy</option>
-                  <option value="direct">Direct OpenAI-compatible API</option>
+                  <option value="direct">Direct from browser</option>
+                  <option value="extension">Companion extension</option>
                   <option value="local">Local wllama in the browser</option>
                   {(isChromePromptApiSupported(chromeAvailability) || effectiveLlm.transport === "chrome") && (
                     <option value="chrome" disabled={!isChromePromptApiSupported(chromeAvailability)}>
@@ -784,11 +800,8 @@ export function SettingsPanel({
                   )}
                 </select>
               </Field>
-              {(effectiveLlm.transport === "proxy" || effectiveLlm.transport === "direct") && (() => {
-                const viaProxy = effectiveLlm.transport === "proxy";
-                const providers = viaProxy ? proxyProviders : defaultDirectProviders;
-                const allowCustom = !viaProxy;
-                const matchedProvider = findLlmProvider(providers, effectiveLlm.baseUrl);
+              {(effectiveLlm.transport === "extension" || effectiveLlm.transport === "direct") && (() => {
+                const matchedProvider = findLlmProvider(remoteProviders, effectiveLlm.baseUrl);
                 return (
                   <>
                     <Field label="Provider">
@@ -796,7 +809,7 @@ export function SettingsPanel({
                         value={matchedProvider?.id ?? customValue}
                         onChange={(event) => {
                           if (event.target.value === customValue) return;
-                          const provider = providers.find((item) => item.id === event.target.value);
+                          const provider = remoteProviders.find((item) => item.id === event.target.value);
                           if (!provider) return;
                           updateActiveConversationLlm({
                             baseUrl: provider.baseUrl,
@@ -807,21 +820,16 @@ export function SettingsPanel({
                           setDiscoverState({ status: "idle" });
                         }}
                       >
-                        {providers.map((provider) => (
+                        {remoteProviders.map((provider) => (
                           <option key={provider.id} value={provider.id}>{provider.label}</option>
                         ))}
-                        {allowCustom
-                          ? <option value={customValue}>Custom OpenAI-compatible API</option>
-                          : !matchedProvider && <option value={customValue} disabled>Unavailable configured provider</option>}
+                        <option value={customValue}>Custom OpenAI-compatible API</option>
                       </select>
                     </Field>
                     <Field label="API URL">
                       <input
                         value={effectiveLlm.baseUrl}
                         onChange={(event) => updateActiveConversationLlm({ baseUrl: event.target.value })}
-                        readOnly={viaProxy}
-                        aria-readonly={viaProxy || undefined}
-                        title={viaProxy ? "The URL is locked to the proxy's upstream whitelist." : undefined}
                       />
                     </Field>
                     <SecretField value={effectiveLlm.apiKey} remember={effectiveLlm.rememberApiKey} onChange={(apiKey) => updateActiveConversationLlm({ apiKey })} onRemember={(rememberApiKey) => updateActiveConversationLlm({ rememberApiKey })} />
@@ -839,7 +847,7 @@ export function SettingsPanel({
                     ? "https://developer.chrome.com/docs/ai/prompt-api"
                     : modelWebSearch(query)}
                 onChange={(modelId) => updateActiveConversationLlm({ modelId })}
-                onFetchModels={effectiveLlm.transport === "proxy" || effectiveLlm.transport === "direct"
+                onFetchModels={effectiveLlm.transport === "extension" || effectiveLlm.transport === "direct"
                   ? () => void fetchRemoteModels()
                   : undefined}
                 fetching={discoverState.status === "loading"}
@@ -867,8 +875,8 @@ export function SettingsPanel({
             <>
               <Field label="Transport">
                 <select value={settings.stt.transport} onChange={(event) => updateStt({ transport: event.target.value as SttSettings["transport"] })}>
-                  <option value="proxy">Built-in proxy</option>
                   <option value="direct">Direct from browser</option>
+                  <option value="extension">Companion extension</option>
                 </select>
               </Field>
               <Field label="API URL"><input value={settings.stt.baseUrl} onChange={(event) => updateStt({ baseUrl: event.target.value })} /></Field>
@@ -900,8 +908,8 @@ export function SettingsPanel({
             <>
               <Field label="Transport">
                 <select value={settings.tts.transport} onChange={(event) => updateTts({ transport: event.target.value as TtsSettings["transport"] })}>
-                  <option value="proxy">Built-in proxy</option>
                   <option value="direct">Direct from browser</option>
+                  <option value="extension">Companion extension</option>
                 </select>
               </Field>
               <Field label="API URL"><input value={settings.tts.baseUrl} onChange={(event) => updateTts({ baseUrl: event.target.value })} /></Field>
@@ -910,7 +918,15 @@ export function SettingsPanel({
             </>
           )}
           {settings.tts.provider === "google-cloud" && (
-            <SecretField value={settings.tts.apiKey} remember={settings.tts.rememberApiKey} onChange={(apiKey) => updateTts({ apiKey })} onRemember={(rememberApiKey) => updateTts({ rememberApiKey })} />
+            <>
+              <Field label="Transport">
+                <select value={settings.tts.transport} onChange={(event) => updateTts({ transport: event.target.value as TtsSettings["transport"] })}>
+                  <option value="direct">Direct from browser</option>
+                  <option value="extension">Companion extension</option>
+                </select>
+              </Field>
+              <SecretField value={settings.tts.apiKey} remember={settings.tts.rememberApiKey} onChange={(apiKey) => updateTts({ apiKey })} onRemember={(rememberApiKey) => updateTts({ rememberApiKey })} />
+            </>
           )}
           <LanguageField value={settings.tts.language} onChange={(language) => {
             const voice = localVoices[language]?.[0]?.value || settings.tts.voice;
@@ -1043,6 +1059,73 @@ export function SettingsPanel({
             {realtimeConnectionStatus ? <span className="status-copy" role="status">{realtimeConnectionStatus}</span> : null}
           </section>
         )}
+
+        <section className="settings-section route-settings-details" aria-label="Content providers">
+          <h3>Content and tools</h3>
+          <p className="settings-section-copy">Only the provider selected here is called. Content returned by files, pages, and transcripts is treated as untrusted data.</p>
+          <Field label="Web page provider">
+            <select
+              value={settings.content.webProvider}
+              onChange={(event) => {
+                const webProvider = event.target.value as typeof settings.content.webProvider;
+                updateContent({ webProvider, ...(webProvider === "extension-reader" ? { webTransport: "extension" } : {}) });
+              }}
+            >
+              <option value="exa">Exa Contents API</option>
+              <option value="extension-reader">Extension reader (public pages)</option>
+            </select>
+          </Field>
+          <Field label="Web transport">
+            <select
+              value={settings.content.webTransport}
+              onChange={(event) => updateContent({ webTransport: event.target.value as typeof settings.content.webTransport })}
+              disabled={settings.content.webProvider === "extension-reader"}
+            >
+              <option value="direct">Direct from browser</option>
+              <option value="extension">Companion extension</option>
+            </select>
+          </Field>
+          {settings.content.webProvider === "exa" ? (
+            <SecretField
+              value={settings.content.exa.apiKey}
+              remember={settings.content.exa.rememberApiKey}
+              onChange={(apiKey) => updateContentSecret("exa", { apiKey })}
+              onRemember={(rememberApiKey) => updateContentSecret("exa", { rememberApiKey })}
+            />
+          ) : (
+            <span className="status-copy">The extension requests exact origin access after an explicit user action. Login sessions, private addresses, and paywalls are not used.</span>
+          )}
+          <Field label="Video transcript provider">
+            <select value={settings.content.videoTranscriptProvider} disabled>
+              <option value="supadata">Supadata</option>
+            </select>
+          </Field>
+          <Field label="Transcript transport">
+            <select
+              value={settings.content.videoTransport}
+              onChange={(event) => updateContent({ videoTransport: event.target.value as typeof settings.content.videoTransport })}
+            >
+              <option value="direct">Direct from browser</option>
+              <option value="extension">Companion extension</option>
+            </select>
+          </Field>
+          <SecretField
+            value={settings.content.supadata.apiKey}
+            remember={settings.content.supadata.rememberApiKey}
+            onChange={(apiKey) => updateContentSecret("supadata", { apiKey })}
+            onRemember={(rememberApiKey) => updateContentSecret("supadata", { rememberApiKey })}
+          />
+          <Field label="Custom model image support">
+            <select
+              value={settings.capabilities.vision}
+              onChange={(event) => updateCapabilities({ vision: event.target.value as typeof settings.capabilities.vision })}
+            >
+              <option value="auto">Automatic from provider catalogue</option>
+              <option value="enabled">This model supports images</option>
+              <option value="disabled">This model does not support images</option>
+            </select>
+          </Field>
+        </section>
 
         <section className="settings-section settings-reset">
           <button className="danger-button" onClick={resetSettings}>Restore defaults</button>

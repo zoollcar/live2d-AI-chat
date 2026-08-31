@@ -7,10 +7,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultSettings } from "@/infrastructure/config/defaults";
 import { useSettingsStore } from "@/infrastructure/config/store";
 import { useConversationStore } from "@/infrastructure/conversation/store";
+import { createExtensionFetch } from "@/infrastructure/extension/bridge-client";
 import { createConversation } from "@/model/conversation";
 import { SettingsPanel } from "./SettingsPanel";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const bridgeMocks = vi.hoisted(() => ({ fetch: vi.fn() }));
+
+vi.mock("@/infrastructure/extension/bridge-client", () => ({
+  createExtensionFetch: vi.fn(() => bridgeMocks.fetch),
+  extensionBridge: { connect: vi.fn(async () => undefined) },
+}));
 
 vi.mock("@/agent/local-models", () => ({
   downloadLocalModel: vi.fn(async () => undefined),
@@ -72,6 +80,8 @@ async function renderSettings(route: AppSettings["voiceRoute"]): Promise<string>
 
 describe("SettingsPanel voice routes", () => {
   beforeEach(() => {
+    bridgeMocks.fetch.mockReset();
+    vi.mocked(createExtensionFetch).mockClear();
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true,
       json: async () => ({ upstreams: [] }),
@@ -192,5 +202,64 @@ describe("SettingsPanel voice routes", () => {
     expect(markup).toContain("active-chat-model");
     expect(markup).toContain("https://active-chat.example/v1");
     expect(useSettingsStore.getState().settings.llm.modelId).toBe("global-default-model");
+  });
+
+  it("shows Google Cloud transport and loads voices through the selected extension", async () => {
+    vi.useFakeTimers();
+    bridgeMocks.fetch.mockResolvedValue(new Response(JSON.stringify({
+      voices: [
+        {
+          languageCodes: ["en-US"],
+          name: "en-US-Wavenet-A",
+          ssmlGender: "FEMALE",
+          naturalSampleRateHertz: 24_000,
+        },
+        {
+          languageCodes: ["cmn-CN"],
+          name: "cmn-CN-Wavenet-A",
+          ssmlGender: "FEMALE",
+          naturalSampleRateHertz: 24_000,
+        },
+      ],
+    }), { headers: { "content-type": "application/json" } }));
+    const settings = settingsFor("classic");
+    settings.tts = {
+      ...settings.tts,
+      provider: "google-cloud",
+      transport: "extension",
+      apiKey: "google-key",
+      language: "zh-CN",
+      voice: "",
+    };
+    useSettingsStore.setState({ settings, hydrated: true });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(createElement(SettingsPanel, settingsPanelProps)));
+    const synthesisSection = Array.from(container.querySelectorAll("details"))
+      .find((section) => section.textContent?.includes("Speech synthesis"));
+    const transportField = Array.from(synthesisSection?.querySelectorAll("label.field") ?? [])
+      .find((field) => field.querySelector(":scope > span")?.textContent === "Transport");
+    const transportSelect = transportField?.querySelector("select");
+    expect(transportSelect?.value).toBe("extension");
+    expect(transportSelect?.textContent).toContain("Direct from browser");
+    expect(transportSelect?.textContent).toContain("Companion extension");
+
+    await act(async () => vi.advanceTimersByTimeAsync(400));
+
+    expect(createExtensionFetch).toHaveBeenCalledWith({
+      operation: "models",
+      provider: "google-cloud",
+      apiKey: "google-key",
+    });
+    expect(container.textContent).toContain("cmn-CN-Wavenet-A · Female · 24 kHz");
+    expect(container.textContent).not.toContain("en-US-Wavenet-A");
+    expect(useSettingsStore.getState().settings.tts.voice).toBe("cmn-CN-Wavenet-A");
+    const directFetch = vi.mocked(globalThis.fetch);
+    expect(directFetch.mock.calls.some(([input]) => String(input).includes("texttospeech.googleapis.com"))).toBe(false);
+
+    await act(async () => root.unmount());
+    container.remove();
   });
 });

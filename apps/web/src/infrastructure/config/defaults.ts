@@ -1,14 +1,14 @@
 import type { AppSettings } from "@live2d-chat/shared";
 
 export const defaultSettings: AppSettings = {
-  version: 3,
+  version: 4,
   voiceRoute: "classic",
   voiceInteraction: {
     handsFree: false,
     allowVoiceInterruption: true,
   },
   llm: {
-    transport: "proxy",
+    transport: "direct",
     baseUrl: "https://api.openai.com/v1",
     apiKey: "",
     rememberApiKey: false,
@@ -45,12 +45,29 @@ export const defaultSettings: AppSettings = {
       rememberApiKey: false,
     },
   },
+  content: {
+    webProvider: "exa",
+    webTransport: "direct",
+    videoTranscriptProvider: "supadata",
+    videoTransport: "direct",
+    exa: {
+      apiKey: "",
+      rememberApiKey: false,
+    },
+    supadata: {
+      apiKey: "",
+      rememberApiKey: false,
+    },
+  },
+  capabilities: {
+    vision: "auto",
+  },
   subtitlesEnabled: true,
 };
 
 export function normalizeBaseUrl(input: string): string {
   const value = input.trim().replace(/\/+$/, "");
-  if (value.startsWith("/")) return value;
+  if (value.startsWith("/")) throw new Error("API base URL must be absolute.");
   if (!/^https?:\/\//i.test(value)) return `http://${value}`;
   return value;
 }

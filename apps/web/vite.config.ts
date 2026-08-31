@@ -4,6 +4,9 @@ import { defineConfig } from "vite";
 import { viteStaticCopy } from "vite-plugin-static-copy";
 
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify("1.0.0"),
+  },
   plugins: [
     react(),
     viteStaticCopy({
@@ -25,9 +28,6 @@ export default defineConfig({
     headers: {
       "Cross-Origin-Opener-Policy": "same-origin",
       "Cross-Origin-Embedder-Policy": "credentialless",
-    },
-    proxy: {
-      "/api": "http://localhost:8787",
     },
   },
   preview: {

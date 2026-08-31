@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { LlmSettings } from "@live2d-chat/shared";
+import { artifactRefSchema, resourceRefSchema, type LlmSettings } from "@live2d-chat/shared";
 import type { ChatMessage } from "@/agent";
 
 export const CONVERSATION_EXPORT_FORMAT = "live2d-chat-conversations";
@@ -56,13 +56,28 @@ const chatMessageSchema: z.ZodType<ChatMessage> = z.object({
   interrupted: z.boolean().optional(),
   reasoning: z.string().max(2_000_000).optional(),
   toolCalls: z.array(toolCallSchema).max(2_000).optional(),
+  attachments: z.array(resourceRefSchema).max(10).optional(),
+  artifacts: z.array(artifactRefSchema).max(200).optional(),
 }).passthrough();
 
-export const conversationModelSnapshotSchema: z.ZodType<ConversationModelSnapshot> = z.object({
-  transport: z.enum(["proxy", "direct", "local", "chrome"]),
+const currentConversationModelSnapshotSchema: z.ZodType<ConversationModelSnapshot> = z.object({
+  transport: z.enum(["extension", "direct", "local", "chrome"]),
   baseUrl: z.string().trim().max(2_000),
   modelId: z.string().trim().min(1).max(500),
 }).strict();
+
+export const conversationModelSnapshotSchema: z.ZodType<ConversationModelSnapshot> = z.preprocess((value) => {
+  if (typeof value !== "object" || value === null) return value;
+  const snapshot = value as Record<string, unknown>;
+  if (snapshot.transport !== "proxy") return value;
+  return {
+    ...snapshot,
+    transport: "extension",
+    baseUrl: typeof snapshot.baseUrl === "string" && snapshot.baseUrl.startsWith("/api/llm/")
+      ? "https://api.openai.com/v1"
+      : snapshot.baseUrl,
+  };
+}, currentConversationModelSnapshotSchema);
 
 export const conversationSchema: z.ZodType<Conversation> = z.object({
   id: z.string().trim().min(1).max(100),
@@ -136,7 +151,9 @@ export function createConversation(input: {
 }
 
 export function deriveConversationTitle(messages: readonly ChatMessage[]): string | undefined {
-  const content = messages.find((message) => message.role === "user")?.content.trim().replace(/\s+/g, " ");
+  const firstUser = messages.find((message) => message.role === "user");
+  const content = firstUser?.content.trim().replace(/\s+/g, " ")
+    || firstUser?.attachments?.map((attachment) => attachment.name).join(", ");
   if (!content) return undefined;
   return content.length > 48 ? `${content.slice(0, 47)}…` : content;
 }

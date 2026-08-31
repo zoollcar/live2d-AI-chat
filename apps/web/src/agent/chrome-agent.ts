@@ -1,4 +1,4 @@
-import { createSceneToolRegistry } from "./tools";
+import { createAgentToolRegistry } from "./tools";
 import type { AgentRunOptions, AgentRuntime, ChatMessage } from "./types";
 
 export const CHROME_MODEL_ID = "gemini-nano";
@@ -14,11 +14,21 @@ export class ChromeAgentRuntime implements AgentRuntime {
       }
 
       emit({ type: "status", kind: "busy", message: "Starting Chrome built-in AI…" });
-      const registry = createSceneToolRegistry(scene, emit);
+      const registry = createAgentToolRegistry({
+        scene,
+        emit,
+        resources: options.resources,
+        workspace: options.workspace,
+        network: options.network,
+        capabilities: options.toolCapabilities,
+      });
       const { initialPrompts, prompt } = splitPrompt(options.messages);
       session = await LanguageModel.create({
         initialPrompts,
         tools: registry.chromeTools,
+        ...(options.toolCapabilities?.inspectImage ? {
+          expectedInputs: [{ type: "image" as const }, { type: "text" as const }],
+        } : {}),
         signal,
         monitor(monitor) {
           monitor.addEventListener("downloadprogress", (event) => {

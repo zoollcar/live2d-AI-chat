@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Live2D AI Chat Bridge</title>
+  </head>
+  <body>
+    <main>
+      <header>
+        <span class="eyebrow">Live2D AI Chat</span>
+        <h1>Network Bridge</h1>
+      </header>
+
+      <section aria-labelledby="site-title">
+        <h2 id="site-title">Current site</h2>
+        <p id="site-origin" class="origin">Checking the active tab…</p>
+        <p id="site-status" class="status" role="status"></p>
+        <button id="site-toggle" type="button" disabled>Connect this site</button>
+      </section>
+
+      <section aria-labelledby="origin-title">
+        <h2 id="origin-title">Custom API or page origin</h2>
+        <p class="hint">Grant one exact HTTP(S) origin for a custom model API or the read-page tool.</p>
+        <label for="api-origin">URL</label>
+        <input id="api-origin" type="url" inputmode="url" placeholder="https://api.example.com/v1" />
+        <button id="grant-origin" class="secondary" type="button">Grant origin</button>
+        <p id="grant-status" class="status" role="status"></p>
+      </section>
+
+      <details>
+        <summary>Granted origins</summary>
+        <ul id="granted-origins"></ul>
+      </details>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

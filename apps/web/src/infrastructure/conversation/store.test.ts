@@ -1,14 +1,30 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createConversation } from "@/model/conversation";
+import {
+  CONVERSATION_EXPORT_FORMAT,
+  CONVERSATION_EXPORT_VERSION,
+  createConversation,
+} from "@/model/conversation";
+
+const indexedDb = vi.hoisted(() => ({
+  deleteConversationRecord: vi.fn(async () => undefined),
+  loadConversationDatabase: vi.fn(),
+  saveActiveConversationId: vi.fn(async () => undefined),
+  saveConversation: vi.fn(async () => undefined),
+  saveConversationImport: vi.fn(async () => undefined),
+}));
+
+vi.mock("./indexed-db", () => indexedDb);
+
 import { useConversationStore } from "./store";
 
 describe("conversation model snapshots", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.clearAllMocks();
     const conversation = createConversation({
       characterId: "ai-secretary",
       modelSnapshot: {
-        transport: "proxy",
+        transport: "extension",
         baseUrl: "https://api.openai.com/v1",
         modelId: "gpt-4.1-mini",
       },
@@ -46,5 +62,33 @@ describe("conversation model snapshots", () => {
       baseUrl: "https://api.openai.com/v1",
       modelId: "unsloth/Qwen3.5-0.8B-GGUF",
     });
+  });
+
+  it("does not expose imported conversations when their atomic persistence fails", async () => {
+    const before = useConversationStore.getState();
+    const imported = createConversation({
+      characterId: "ai-secretary",
+      modelSnapshot: {
+        transport: "direct",
+        baseUrl: "https://api.openai.com/v1",
+        modelId: "gpt-4.1-mini",
+      },
+      messages: [{ role: "user", content: "Imported" }],
+      now: 200,
+    });
+    indexedDb.saveConversationImport.mockRejectedValueOnce(new Error("conversation storage failed"));
+
+    await expect(useConversationStore.getState().importJson(JSON.stringify({
+      format: CONVERSATION_EXPORT_FORMAT,
+      version: CONVERSATION_EXPORT_VERSION,
+      exportedAt: "2026-08-31T00:00:00.000Z",
+      conversations: [imported],
+    }))).rejects.toThrow("conversation storage failed");
+
+    const after = useConversationStore.getState();
+    expect(after.conversations).toEqual(before.conversations);
+    expect(after.activeConversationId).toBe(before.activeConversationId);
+    expect(after.storageError).toBe("conversation storage failed");
+    expect(indexedDb.saveConversationImport).toHaveBeenCalledWith([imported], imported.id);
   });
 });

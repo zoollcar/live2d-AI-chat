@@ -30,4 +30,19 @@ describe("Chrome Prompt API capability detection", () => {
     const availability = await getChromePromptApiAvailability();
     expect(isChromePromptApiSupported(availability)).toBe(false);
   });
+
+  it("uses the same vision-gated tool schema for availability checks as session creation", async () => {
+    const availability = vi.fn().mockResolvedValue("available");
+    vi.stubGlobal("LanguageModel", { availability });
+
+    await getChromePromptApiAvailability({ inspectImage: true });
+    const enabled = availability.mock.calls[0][0] as LanguageModelCreateOptions;
+    expect(enabled.tools?.map((tool) => tool.name)).toContain("inspectImage");
+    expect(enabled.expectedInputs).toEqual([{ type: "image" }, { type: "text" }]);
+
+    await getChromePromptApiAvailability({ inspectImage: false });
+    const disabled = availability.mock.calls[1][0] as LanguageModelCreateOptions;
+    expect(disabled.tools?.map((tool) => tool.name)).not.toContain("inspectImage");
+    expect(disabled.expectedInputs).toBeUndefined();
+  });
 });

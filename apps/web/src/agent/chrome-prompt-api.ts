@@ -2,11 +2,18 @@ import { createChromeSceneTools } from "./tools";
 
 export type ChromePromptApiAvailability = Availability | "unsupported";
 
-export async function getChromePromptApiAvailability(): Promise<ChromePromptApiAvailability> {
+export async function getChromePromptApiAvailability(
+  options: { inspectImage?: boolean } = {},
+): Promise<ChromePromptApiAvailability> {
   if (typeof LanguageModel === "undefined") return "unsupported";
   try {
     return await LanguageModel.availability({
-      tools: createChromeSceneTools(async () => ({ ok: true })),
+      ...(options.inspectImage ? {
+        expectedInputs: [{ type: "image" as const }, { type: "text" as const }],
+      } : {}),
+      tools: createChromeSceneTools(async () => ({ ok: true }), {
+        inspectImage: options.inspectImage ?? false,
+      }),
     });
   } catch {
     return "unsupported";

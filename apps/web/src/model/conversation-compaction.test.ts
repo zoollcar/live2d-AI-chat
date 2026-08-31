@@ -11,7 +11,7 @@ import {
 } from "./conversation-compaction";
 
 const modelSnapshot = {
-  transport: "proxy" as const,
+  transport: "extension" as const,
   baseUrl: "https://api.openai.com/v1",
   modelId: "gpt-4.1-mini",
 };

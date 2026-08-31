@@ -1,9 +1,10 @@
 import type {
   ChatCompletionMessage,
   ChatCompletionTool,
+  ChatCompletionToolFunctionParameters,
   Wllama,
 } from "@wllama/wllama";
-import { createSceneToolRegistry } from "./tools";
+import { createAgentToolRegistry } from "./tools";
 import type { AgentRunOptions, AgentRuntime } from "./types";
 import { downloadLocalModel, getLocalModelConfig } from "./local-models";
 import {
@@ -17,6 +18,84 @@ import {
 // which inference backend is active.
 const MAX_STEPS = 5;
 
+interface RegistryToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description?: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Wllama deliberately accepts a narrower JSON Schema subset than the remote
+ * runtimes. Validate the generated object schema at the boundary instead of
+ * asserting that every arbitrary JSON Schema is compatible.
+ */
+function toWllamaParameters(schema: Record<string, unknown>): ChatCompletionToolFunctionParameters {
+  if (schema.type !== "object" || !isRecord(schema.properties)) {
+    throw new Error("Local model tools require an object JSON Schema with properties.");
+  }
+
+  const properties: ChatCompletionToolFunctionParameters["properties"] = {};
+  for (const [name, value] of Object.entries(schema.properties)) {
+    if (!isRecord(value) || typeof value.type !== "string") {
+      throw new Error(`Local model tool property ${name} must declare a JSON Schema type.`);
+    }
+    const property: ChatCompletionToolFunctionParameters["properties"][string] = {
+      type: value.type,
+    };
+    for (const [key, nestedValue] of Object.entries(value)) {
+      if (key !== "description" && key !== "enum" && key !== "type") property[key] = nestedValue;
+    }
+    if (value.description !== undefined) {
+      if (typeof value.description !== "string") {
+        throw new Error(`Local model tool property ${name} has an invalid description.`);
+      }
+      property.description = value.description;
+    }
+    if (value.enum !== undefined) {
+      if (!Array.isArray(value.enum) || !value.enum.every((item) => typeof item === "string")) {
+        throw new Error(`Local model tool property ${name} has a non-string enum.`);
+      }
+      property.enum = value.enum;
+    }
+    properties[name] = property;
+  }
+
+  if (schema.required !== undefined
+    && (!Array.isArray(schema.required) || !schema.required.every((item) => typeof item === "string"))) {
+    throw new Error("Local model tool schema has an invalid required list.");
+  }
+  if (schema.additionalProperties !== undefined && typeof schema.additionalProperties !== "boolean") {
+    throw new Error("Local model tool schema has an unsupported additionalProperties value.");
+  }
+
+  return {
+    type: "object",
+    properties,
+    ...(schema.required ? { required: schema.required } : {}),
+    ...(schema.additionalProperties === undefined
+      ? {}
+      : { additionalProperties: schema.additionalProperties }),
+  };
+}
+
+function toWllamaTools(definitions: readonly RegistryToolDefinition[]): ChatCompletionTool[] {
+  return definitions.map((definition) => ({
+    type: "function",
+    function: {
+      name: definition.function.name,
+      description: definition.function.description,
+      parameters: toWllamaParameters(definition.function.parameters),
+    },
+  }));
+}
+
 export class LocalAgentRuntime implements AgentRuntime {
   private engine?: Wllama;
   private loadedModelId?: string;
@@ -25,7 +104,15 @@ export class LocalAgentRuntime implements AgentRuntime {
     const { emit, scene, signal } = options;
     try {
       const engine = await this.getEngine(options);
-      const registry = createSceneToolRegistry(scene, emit);
+      const registry = createAgentToolRegistry({
+        scene,
+        emit,
+        resources: options.resources,
+        workspace: options.workspace,
+        network: options.network,
+        capabilities: options.toolCapabilities,
+      });
+      const wllamaTools = toWllamaTools(registry.wllamaTools);
       const messages: ChatCompletionMessage[] = [...options.messages];
 
       for (let step = 1; step <= MAX_STEPS && !signal.aborted; step += 1) {
@@ -39,7 +126,7 @@ export class LocalAgentRuntime implements AgentRuntime {
         });
         const stream = await engine.createChatCompletion({
           messages,
-          tools: registry.wllamaTools as ChatCompletionTool[],
+          tools: wllamaTools,
           tool_choice: "auto",
           stream: true,
           max_tokens: LOCAL_MAX_OUTPUT_TOKENS,
@@ -81,7 +168,7 @@ export class LocalAgentRuntime implements AgentRuntime {
         const toolResultMessages: ChatCompletionMessage[] = [];
         for (const call of toolCalls) {
           const input = JSON.parse(call.function.arguments || "{}");
-          const output = await registry.execute(call.function.name, input);
+          const output = await registry.execute(call.id, call.function.name, input, signal);
           toolResultMessages.push({
             role: "tool",
             tool_call_id: call.id,

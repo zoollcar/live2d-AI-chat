@@ -14,6 +14,7 @@ export class SpeechQueue {
     private readonly settings: TtsSettings,
     private readonly scene: SceneController,
     private readonly onSentence: (sentence: string) => void,
+    private readonly onError?: (error: Error) => void,
   ) {}
 
   enqueue(sentence: string) {
@@ -70,7 +71,10 @@ export class SpeechQueue {
         }
       }
     } catch (error) {
-      if (!(error instanceof DOMException && error.name === "AbortError")) console.error(error);
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        console.error(error);
+        this.onError?.(error instanceof Error ? error : new Error("Speech playback failed."));
+      }
     } finally {
       if (generation === this.generation) {
         this.running = false;

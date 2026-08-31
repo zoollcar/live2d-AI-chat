@@ -9,6 +9,7 @@ describe("dynamic agent status", () => {
       state: "happy",
       decorations: ["crown"],
       layout: "half-body-left",
+      layoutRevision: 3,
       viewport: { width: 1280, height: 720 },
     };
     const result = prefixAgentStatus("What time is it?", snapshot, new Date(2026, 7, 27, 17, 45, 0));
@@ -25,6 +26,7 @@ describe("dynamic agent status", () => {
       state: "neutral",
       decorations: [],
       layout: "full-body-center",
+      layoutRevision: 0,
       viewport: { width: 800, height: 600 },
     }, new Date(2026, 7, 30, 9, 0, 0));
 

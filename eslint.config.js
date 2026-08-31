@@ -7,6 +7,8 @@ export default tseslint.config(
     ignores: [
       "**/dist/**",
       "**/node_modules/**",
+      "apps/extension/.output/**",
+      "apps/extension/.wxt/**",
       "apps/web/public/**",
     ],
   },
@@ -17,8 +19,18 @@ export default tseslint.config(
     languageOptions: { globals: globals.browser },
   },
   {
-    files: ["apps/api/**/*.ts", "*.config.{js,ts}", "api/**/*.ts"],
+    files: ["*.config.{js,ts}", "apps/extension/*.config.ts"],
     languageOptions: { globals: globals.node },
+  },
+  {
+    files: ["apps/extension/**/*.ts"],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        defineBackground: "readonly",
+        defineUnlistedScript: "readonly",
+      },
+    },
   },
   {
     rules: {

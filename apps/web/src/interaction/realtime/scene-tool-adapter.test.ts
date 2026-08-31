@@ -24,6 +24,14 @@ describe("Google Live scene tool adapter", () => {
       "setDecorations",
       "performAction",
       "setStageLayout",
+      "listResources",
+      "readResource",
+      "readWebPage",
+      "readVideoTranscript",
+      "showResourceOnStage",
+      "closeStageContent",
+      "drawSvgOnStage",
+      "sendSticker",
     ]);
     expect(adapter.declarations[0]).toMatchObject({
       name: "setState",
@@ -42,8 +50,13 @@ describe("Google Live scene tool adapter", () => {
       .resolves.toEqual({ ok: true, layout: "half-body-right" });
     expect(scene.setStageLayout).toHaveBeenCalledWith("half-body-right");
     expect(events).toEqual([
-      { type: "tool-call", name: "setStageLayout", input: { layout: "half-body-right" } },
-      { type: "tool-result", name: "setStageLayout", output: { ok: true, layout: "half-body-right" } },
+      { type: "tool-call", callId: "call-1", name: "setStageLayout", input: { layout: "half-body-right" } },
+      {
+        type: "tool-result",
+        callId: "call-1",
+        name: "setStageLayout",
+        output: { ok: true, layout: "half-body-right" },
+      },
     ]);
   });
 

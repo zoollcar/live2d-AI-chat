@@ -78,6 +78,8 @@ export interface SceneSnapshot {
   decorations: DecorationId[];
   action?: ActionId;
   layout: StageLayoutId;
+  /** Monotonically increases for every requested stage-layout change. */
+  layoutRevision: number;
   viewport: { width: number; height: number };
 }
 

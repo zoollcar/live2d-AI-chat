@@ -2,7 +2,11 @@ import { useDeferredValue, useMemo, useRef, useState } from "react";
 import type { ToolCallRecord } from "@/agent";
 import { useCharacterStore } from "@/infrastructure/character/store";
 import { useConversationStore } from "@/infrastructure/conversation/store";
-import { serializeConversationExport } from "@/model/conversation";
+import {
+  exportConversationLibraryArchive,
+  importConversationLibraryArchive,
+} from "@/infrastructure/resources/conversation-archive";
+import { resourceRepository } from "@/infrastructure/resources/indexed-db-v2";
 
 interface Props {
   onClose(): void;
@@ -42,12 +46,11 @@ function ToolCallEntry({ call }: { call: ToolCallRecord }) {
   );
 }
 
-function downloadConversations(json: string) {
-  const blob = new Blob([json], { type: "application/json" });
+function downloadConversations(blob: Blob) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `live2d-conversations-${new Date().toISOString().slice(0, 10)}.json`;
+  anchor.download = `live2d-chat-archive-${new Date().toISOString().slice(0, 10)}.zip`;
   anchor.click();
   URL.revokeObjectURL(url);
 }
@@ -65,6 +68,7 @@ export function ConversationLibrary({ onClose, onCreateConversation, onDeleteCon
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
   const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId);
   const filtered = useMemo(() => {
@@ -88,41 +92,56 @@ export function ConversationLibrary({ onClose, onCreateConversation, onDeleteCon
   const importFile = async (file: File | undefined) => {
     if (!file) return;
     const previousActiveId = useConversationStore.getState().activeConversationId;
+    setBusy(true);
     try {
-      const count = await importJson(await file.text());
+      const result = await importConversationLibraryArchive({
+        input: file,
+        existingConversations: useConversationStore.getState().conversations,
+        repository: resourceRepository,
+        importConversations: async (payload) => {
+          const count = await importJson(JSON.stringify(payload));
+          const error = useConversationStore.getState().storageError;
+          if (error) throw new Error(error);
+          return count;
+        },
+      });
       const activeId = useConversationStore.getState().activeConversationId;
       if (activeId) await onSelectConversation(activeId);
-      setStatus(`Imported ${count} conversation${count === 1 ? "" : "s"}.`);
+      setStatus(`Imported ${result.count} conversation${result.count === 1 ? "" : "s"}${result.legacyJson ? " from legacy JSON" : " with resources"}.`);
     } catch (error) {
       if (previousActiveId) await onSelectConversation(previousActiveId).catch(() => undefined);
       setStatus(error instanceof Error ? error.message : "Unable to import conversations.");
     } finally {
+      setBusy(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
-  const exportAll = () => {
+  const exportAll = async () => {
+    setBusy(true);
     try {
-      downloadConversations(serializeConversationExport(conversations));
+      downloadConversations(await exportConversationLibraryArchive(conversations, resourceRepository));
       setStatus(`Exported ${conversations.length} conversation${conversations.length === 1 ? "" : "s"}.`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to export conversations.");
+    } finally {
+      setBusy(false);
     }
   };
 
   return (
     <div className="history-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="history-dialog conversation-library" role="dialog" aria-modal="true" aria-labelledby="history-title">
+      <section className="history-dialog conversation-library" role="dialog" aria-modal="true" aria-labelledby="history-title" aria-busy={busy}>
         <header className="history-header">
           <div><p className="eyebrow">CONVERSATION LIBRARY</p><h2 id="history-title">Chat history</h2></div>
           <div className="history-header-actions">
-            <button onClick={() => void run(onCreateConversation, "Created a new conversation.")}>New</button>
-            <button onClick={exportAll}>Export</button>
-            <button onClick={() => fileInputRef.current?.click()}>Import</button>
+            <button disabled={busy} onClick={() => void run(onCreateConversation, "Created a new conversation.")}>New</button>
+            <button disabled={busy} onClick={() => void exportAll()}>Export ZIP</button>
+            <button disabled={busy} onClick={() => fileInputRef.current?.click()}>Import</button>
             <button className="icon-button" onClick={onClose} aria-label="Close chat history">×</button>
           </div>
         </header>
-        <input ref={fileInputRef} className="visually-hidden" type="file" accept="application/json,.json" onChange={(event) => void importFile(event.target.files?.[0])} />
+        <input ref={fileInputRef} className="visually-hidden" type="file" accept="application/zip,application/json,.zip,.json" onChange={(event) => void importFile(event.target.files?.[0])} />
         <div className="conversation-library-body">
           <aside className="conversation-sidebar" aria-label="Conversations">
             <input className="conversation-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search conversations…" aria-label="Search conversations" />

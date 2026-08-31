@@ -103,6 +103,7 @@ export class SceneController {
       state: "neutral",
       decorations: [],
       layout: "full-body-center",
+      layoutRevision: 0,
       viewport: { width: app.screen.width, height: app.screen.height },
     };
     this.nextBlinkAtMs = performance.now() + this.randomBlinkInterval();
@@ -193,6 +194,7 @@ export class SceneController {
 
   setStageLayout(id: StageLayoutId) {
     this.snapshotValue.layout = id;
+    this.snapshotValue.layoutRevision += 1;
     this.animateLayout();
   }
 

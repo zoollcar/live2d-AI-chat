@@ -170,7 +170,7 @@ function createConversation(messages: ChatMessage[] = []): Conversation {
     starred: false,
     characterId: defaultCharacterProfile.id,
     modelSnapshot: {
-      transport: "proxy",
+      transport: "extension",
       baseUrl: "https://example.test/v1",
       modelId: "classic-model",
     },
@@ -198,6 +198,7 @@ function createHookOptions(
       state: "neutral",
       decorations: [],
       layout: "full-body-center",
+      layoutRevision: 0,
       viewport: { width: 1_280, height: 720 },
     })),
     beginStreamingSpeech: vi.fn(),

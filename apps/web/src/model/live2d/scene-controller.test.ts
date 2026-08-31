@@ -74,6 +74,22 @@ describe("SceneController visual state", () => {
     expect(controller.snapshot().decorations).toEqual(["cat-ears", "crown"]);
   });
 
+  it("increments the layout revision for every layout request", () => {
+    const { controller } = createHarness();
+    expect(controller.snapshot()).toMatchObject({ layout: "full-body-center", layoutRevision: 0 });
+
+    controller.setStageLayout("half-body-left");
+    const automaticRevision = controller.snapshot().layoutRevision;
+    expect(automaticRevision).toBe(1);
+
+    controller.setStageLayout("full-body-center");
+    controller.setStageLayout("half-body-left");
+    expect(controller.snapshot()).toMatchObject({
+      layout: "half-body-left",
+      layoutRevision: automaticRevision + 2,
+    });
+  });
+
   it("queues performAction calls in one batch and plays them sequentially", async () => {
     const { controller, model } = createHarness();
     // Two performActions enqueued in the same batch — neither awaits.

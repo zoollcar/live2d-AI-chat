@@ -1,5 +1,7 @@
 import type { SttSettings } from "@live2d-chat/shared";
 import { normalizeBaseUrl } from "@/infrastructure/config/defaults";
+import { createExtensionFetch } from "@/infrastructure/extension/bridge-client";
+import { directCorsAwareFetch } from "@/infrastructure/network/direct-fetch";
 import { createLogger } from "@/infrastructure/log";
 import type { RecognitionCallbacks, SpeechRecognitionProvider } from "./types";
 
@@ -93,15 +95,19 @@ export class OpenAiSpeechRecognitionProvider implements SpeechRecognitionProvide
       form.append("model", this.settings.modelId);
       form.append("language", this.settings.language.split("-")[0] || "en");
       const upstreamUrl = normalizeBaseUrl(this.settings.baseUrl);
-      const viaProxy = this.settings.transport === "proxy";
-      const url = viaProxy
-        ? "/api/stt/v1/audio/transcriptions"
-        : `${upstreamUrl}/audio/transcriptions`;
-      const response = await fetch(url, {
+      const extension = this.settings.transport === "extension";
+      const fetcher = extension
+        ? createExtensionFetch({
+            operation: "transcribe",
+            provider: "openai-compatible",
+            baseUrl: upstreamUrl,
+            apiKey: this.settings.apiKey,
+          })
+        : directCorsAwareFetch;
+      const response = await fetcher(`${upstreamUrl}/audio/transcriptions`, {
         method: "POST",
         headers: {
-          ...(this.settings.apiKey ? { authorization: `Bearer ${this.settings.apiKey}` } : {}),
-          ...(viaProxy ? { "X-Stt-Base-URL": upstreamUrl } : {}),
+          ...(!extension && this.settings.apiKey ? { authorization: `Bearer ${this.settings.apiKey}` } : {}),
         },
         body: form,
         signal: controller.signal,

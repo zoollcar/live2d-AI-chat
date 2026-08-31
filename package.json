@@ -8,10 +8,10 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "concurrently -k -n api,web -c cyan,magenta \"pnpm --filter @live2d-chat/api dev\" \"pnpm --filter @live2d-chat/web dev\"",
-    "dev:fresh": "rm -rf apps/web/node_modules/.vite apps/api/node_modules/.vite node_modules/.vite && pnpm dev",
-    "build": "pnpm --filter @live2d-chat/shared build && pnpm --filter @live2d-chat/api build && pnpm --filter @live2d-chat/web build",
-    "start": "pnpm --filter @live2d-chat/api start",
+    "dev": "concurrently -k -n web,extension -c magenta,cyan \"pnpm --filter @live2d-chat/web dev\" \"pnpm --filter @live2d-chat/extension dev\"",
+    "dev:fresh": "pnpm --filter @live2d-chat/extension clean && rm -rf apps/web/node_modules/.vite node_modules/.vite && pnpm dev",
+    "build": "pnpm --filter @live2d-chat/shared build && pnpm --filter @live2d-chat/web build && pnpm --filter @live2d-chat/extension build && pnpm --filter @live2d-chat/extension zip",
+    "start": "pnpm --filter @live2d-chat/web preview --host 0.0.0.0",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint . --max-warnings=0",
     "test": "vitest run",

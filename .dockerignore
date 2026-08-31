@@ -3,5 +3,7 @@
 node_modules
 **/node_modules
 **/dist
+**/.output
+**/.wxt
 coverage
 *.tsbuildinfo

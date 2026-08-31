@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { ChatMessage, ToolCallRecord } from "@/agent";
+import type {
+  AgentNetworkAccess,
+  AgentResourceAccess,
+  AgentToolCapabilities,
+  AgentWorkspaceAccess,
+} from "@/agent/tool-context";
 import { buildAgentStatus, prefixAgentStatus } from "@/agent/status-context";
 import { createSystemMessage } from "@/agent/system-prompt";
 import { useConversationStore } from "@/infrastructure/conversation/store";
@@ -18,7 +24,7 @@ import type { CharacterProfile } from "@/model/character-profile";
 import type { Conversation } from "@/model/conversation";
 import { buildRealtimeInitialHistory } from "@/model/conversation-compaction";
 import type { SceneController } from "@/model/live2d/scene-controller";
-import type { RealtimeSettings, VoiceInteractionSettings } from "@live2d-chat/shared";
+import type { ArtifactRef, RealtimeSettings, ResourceRef, VoiceInteractionSettings } from "@live2d-chat/shared";
 
 type UiStatusKind = "idle" | "busy" | "error";
 
@@ -37,6 +43,10 @@ interface UseGoogleRealtimeOptions {
   conversation?: Conversation;
   settings: RealtimeSettings;
   interaction: VoiceInteractionSettings;
+  resources?: AgentResourceAccess;
+  workspace?: AgentWorkspaceAccess;
+  network?: AgentNetworkAccess;
+  toolCapabilities?: Partial<AgentToolCapabilities>;
   callbacks: GoogleRealtimeUiCallbacks;
 }
 
@@ -59,9 +69,17 @@ interface PendingVoiceInput {
   bargeIn: boolean;
 }
 
+function artifactRefFromToolOutput(output: unknown): ArtifactRef | undefined {
+  if (!output || typeof output !== "object") return undefined;
+  const value = output as Partial<ArtifactRef>;
+  if (typeof value.id !== "string" || typeof value.resourceId !== "string") return undefined;
+  if (value.kind !== "resource-view" && value.kind !== "svg-drawing" && value.kind !== "sticker") return undefined;
+  return { id: value.id, resourceId: value.resourceId, kind: value.kind };
+}
+
 export interface GoogleRealtimeControls extends ConversationSession {
   readonly route: "realtime";
-  sendText(text: string): Promise<void>;
+  sendText(text: string, attachments?: readonly ResourceRef[], runtimeText?: string): Promise<void>;
   startListening(): Promise<void>;
   stopListening(): Promise<void>;
   stopEverything(): Promise<void>;
@@ -112,7 +130,11 @@ export function useGoogleRealtime(options: UseGoogleRealtimeOptions): GoogleReal
     });
   }, []);
 
-  const startTurn = useCallback((inputMode: "text" | "voice", text: string): ActiveTurn | undefined => {
+  const startTurn = useCallback((
+    inputMode: "text" | "voice",
+    text: string,
+    attachments?: readonly ResourceRef[],
+  ): ActiveTurn | undefined => {
     const state = useConversationStore.getState();
     const conversationId = state.activeConversationId;
     if (!conversationId) return undefined;
@@ -127,6 +149,7 @@ export function useGoogleRealtime(options: UseGoogleRealtimeOptions): GoogleReal
           role: "user",
           content: text,
           inputMode,
+          ...(attachments?.length ? { attachments: [...attachments] } : {}),
           ...(inputMode === "voice" && !text ? { transcriptUnavailable: true } : {}),
         },
         { role: "assistant", content: "" },
@@ -459,11 +482,13 @@ export function useGoogleRealtime(options: UseGoogleRealtimeOptions): GoogleReal
     if (event.type === "tool-result") {
       const turn = toolTurnRefs.current.get(event.id) ?? turnRef.current;
       if (!turn) return;
+      const artifact = artifactRefFromToolOutput(event.output);
       patchTurnMessages(turn, (_user, assistant) => ({
         assistant: {
           ...assistant,
           toolCalls: assistant.toolCalls?.map((call) =>
             call.callId === event.id ? { ...call, output: event.output } : call),
+          ...(artifact ? { artifacts: [...(assistant.artifacts ?? []), artifact] } : {}),
         },
       }));
       toolTurnRefs.current.delete(event.id);
@@ -572,7 +597,12 @@ export function useGoogleRealtime(options: UseGoogleRealtimeOptions): GoogleReal
       ? `\n\n<conversation_summary>\n${conversation.summary.content}\n</conversation_summary>`
       : "";
     const systemInstruction = `${createSystemMessage(current.profile).content}${summary}\n\n${buildAgentStatus(current.scene.snapshot())}`;
-    const toolAdapter = createGoogleLiveSceneToolAdapter(current.scene, () => undefined);
+    const toolAdapter = createGoogleLiveSceneToolAdapter(current.scene, () => undefined, {
+      resources: current.resources,
+      workspace: current.workspace,
+      network: current.network,
+      capabilities: current.toolCapabilities,
+    });
     const conversationId = conversation.id;
     const session = new GoogleLiveSession({
       apiKey: current.settings.google.apiKey,
@@ -644,9 +674,13 @@ export function useGoogleRealtime(options: UseGoogleRealtimeOptions): GoogleReal
     if (generation === generationRef.current) void useConversationStore.getState().flushActive();
   }, [finishTurn, setActualListening, setRunning]);
 
-  const sendText = useCallback(async (rawText: string) => {
+  const sendText = useCallback(async (
+    rawText: string,
+    attachments: readonly ResourceRef[] = [],
+    runtimeText?: string,
+  ) => {
     const text = rawText.trim();
-    if (!text) return;
+    if (!text && attachments.length === 0) return;
     if (runningRef.current || turnRef.current) await disposeCurrent(true);
     reducedTurnRef.current = createGoogleLiveTurnState();
     // ensureSession constructs the audio engine synchronously before awaiting
@@ -655,13 +689,13 @@ export function useGoogleRealtime(options: UseGoogleRealtimeOptions): GoogleReal
     const connection = ensureSession();
     await audioRef.current?.resume();
     const { session, generation } = await connection;
-    const turn = startTurn("text", text);
+    const turn = startTurn("text", text, attachments);
     if (!turn || generation !== generationRef.current) return;
     setRunning(true);
     optionsRef.current.callbacks.setSubtitle(text);
     optionsRef.current.callbacks.setStatus("busy", "AI is thinking");
     try {
-      session.sendText(prefixAgentStatus(text, optionsRef.current.scene!.snapshot()));
+      session.sendText(prefixAgentStatus(runtimeText?.trim() || text, optionsRef.current.scene!.snapshot()));
     } catch (error) {
       finishTurn(true);
       setRunning(false);

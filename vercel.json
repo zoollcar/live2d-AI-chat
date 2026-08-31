@@ -1,13 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "fluid": true,
   "buildCommand": "pnpm build",
   "outputDirectory": "apps/web/dist",
-  "functions": {
-    "api/[[...route]].ts": {
-      "maxDuration": 300
-    }
-  },
   "headers": [
     {
       "source": "/(.*)",
@@ -27,9 +21,15 @@
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
       ]
+    },
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
     }
   ],
   "rewrites": [
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

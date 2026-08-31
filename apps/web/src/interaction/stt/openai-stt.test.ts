@@ -1,12 +1,19 @@
 // @vitest-environment jsdom
 
 import type { SttSettings } from "@live2d-chat/shared";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createExtensionFetch } from "@/infrastructure/extension/bridge-client";
 import { OpenAiSpeechRecognitionProvider } from "./openai-stt";
+
+const bridgeMocks = vi.hoisted(() => ({ fetch: vi.fn() }));
+
+vi.mock("@/infrastructure/extension/bridge-client", () => ({
+  createExtensionFetch: vi.fn(() => bridgeMocks.fetch),
+}));
 
 const settings: SttSettings = {
   provider: "openai-compatible",
-  transport: "proxy",
+  transport: "extension",
   baseUrl: "https://speech.example/v1/",
   apiKey: "secret",
   rememberApiKey: false,
@@ -15,11 +22,16 @@ const settings: SttSettings = {
   continuous: false,
 };
 
+beforeEach(() => {
+  bridgeMocks.fetch.mockReset();
+  vi.mocked(createExtensionFetch).mockClear();
+});
+
 afterEach(() => vi.restoreAllMocks());
 
 describe("OpenAI-compatible speech recognition", () => {
-  it("uses the local proxy while preserving the multipart request", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ text: "Hello" }));
+  it("uses the extension bridge without putting credentials in request headers", async () => {
+    bridgeMocks.fetch.mockResolvedValue(Response.json({ text: "Hello" }));
     const onFinal = vi.fn();
     const provider = new OpenAiSpeechRecognitionProvider(settings);
     Object.assign(provider, {
@@ -29,12 +41,17 @@ describe("OpenAI-compatible speech recognition", () => {
 
     await (provider as unknown as { transcribe(): Promise<void> }).transcribe();
 
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/stt/v1/audio/transcriptions");
-    const init = fetchMock.mock.calls[0]?.[1];
+    expect(createExtensionFetch).toHaveBeenCalledWith({
+      operation: "transcribe",
+      provider: "openai-compatible",
+      baseUrl: "https://speech.example/v1",
+      apiKey: "secret",
+    });
+    expect(bridgeMocks.fetch.mock.calls[0]?.[0]).toBe("https://speech.example/v1/audio/transcriptions");
+    const init = bridgeMocks.fetch.mock.calls[0]?.[1] as RequestInit | undefined;
     expect(init?.body).toBeInstanceOf(FormData);
     const headers = new Headers(init?.headers);
-    expect(headers.get("x-stt-base-url")).toBe("https://speech.example/v1");
-    expect(headers.get("authorization")).toBe("Bearer secret");
+    expect(headers.has("authorization")).toBe(false);
     expect(onFinal).toHaveBeenCalledWith("Hello");
   });
 });

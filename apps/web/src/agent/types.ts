@@ -1,5 +1,6 @@
-import type { LlmSettings } from "@live2d-chat/shared";
+import type { ArtifactRef, LlmSettings, ResourceRef } from "@live2d-chat/shared";
 import type { SceneController } from "@/model/live2d/scene-controller";
+import type { AgentNetworkAccess, AgentResourceAccess, AgentToolCapabilities, AgentWorkspaceAccess } from "./tool-context";
 
 /**
  * A tool invocation captured during an assistant turn. The runtime emits a
@@ -44,6 +45,10 @@ export interface ChatMessage {
    * `tool-result` event is received.
    */
   toolCalls?: ToolCallRecord[];
+  /** Browser-local resources referenced by this turn. Binary data lives in IndexedDB. */
+  attachments?: ResourceRef[];
+  /** Stage views, drawings, and stickers produced by this turn. */
+  artifacts?: ArtifactRef[];
 }
 
 /**
@@ -72,8 +77,10 @@ export type AgentEvent =
    * produces these; local wllama models do not emit reasoning.
    */
   | { type: "reasoning-delta"; delta: string }
-  | { type: "tool-call"; name: string; input: unknown }
-  | { type: "tool-result"; name: string; output: unknown }
+  | { type: "tool-call"; callId: string; name: string; input: unknown }
+  | { type: "tool-result"; callId: string; name: string; output: unknown }
+  | { type: "tool-error"; callId: string; name: string; error: string }
+  | { type: "tool-cancel"; callId: string; name: string }
   | { type: "done" }
   | { type: "error"; error: Error };
 
@@ -81,6 +88,10 @@ export interface AgentRunOptions {
   messages: ChatMessage[];
   settings: LlmSettings;
   scene: SceneController;
+  resources?: AgentResourceAccess;
+  workspace?: AgentWorkspaceAccess;
+  network?: AgentNetworkAccess;
+  toolCapabilities?: Partial<AgentToolCapabilities>;
   signal: AbortSignal;
   emit(event: AgentEvent): void;
 }

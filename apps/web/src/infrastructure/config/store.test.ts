@@ -38,7 +38,7 @@ describe("settings route persistence", () => {
     }, 3);
 
     expect(migrated.settings).toMatchObject({
-      version: 3,
+      version: 4,
       voiceRoute: "classic",
       voiceInteraction: {
         handsFree: true,
@@ -63,7 +63,7 @@ describe("settings route persistence", () => {
     });
   });
 
-  it("retains the previous proxy URL migration while upgrading voice routes", () => {
+  it("migrates the removed proxy transport and URL to extension defaults", () => {
     const migrated = migratePersistedSettings({
       settings: {
         llm: {
@@ -78,9 +78,9 @@ describe("settings route persistence", () => {
     expect(migrated.settings).toMatchObject({
       voiceRoute: "classic",
       llm: {
-        transport: "proxy",
+        transport: "extension",
         baseUrl: "https://api.openai.com/v1",
-        modelId: "gpt-4.1-mini",
+        modelId: "",
       },
       voiceInteraction: { handsFree: false },
     });
@@ -157,7 +157,7 @@ describe("settings route persistence", () => {
       version?: number;
       state?: { settings?: { realtime?: { google?: { apiKey?: string } } } };
     } | null;
-    expect(persisted?.version).toBe(5);
+    expect(persisted?.version).toBe(6);
     expect(persisted?.state?.settings?.realtime?.google?.apiKey).toBe("");
 
     store.updateRealtime({ rememberApiKey: true });

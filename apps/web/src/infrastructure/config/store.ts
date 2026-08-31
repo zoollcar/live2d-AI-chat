@@ -1,7 +1,9 @@
 import type {
   AppSettings,
+  ContentProviderSettings,
   GoogleRealtimeSettings,
   LlmSettings,
+  ModelCapabilitySettings,
   RealtimeProviderId,
   RealtimeSettings,
   SttSettings,
@@ -13,7 +15,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { defaultSettings } from "./defaults";
 
-type SecretSection = "llm" | "stt" | "tts" | "realtime";
+type SecretSection = "llm" | "stt" | "tts" | "realtime" | "exa" | "supadata";
 
 const secretKey = (section: SecretSection) => `live2d-chat:${section}:api-key`;
 
@@ -41,6 +43,9 @@ interface SettingsStore {
   updateStt(patch: Partial<SttSettings>): void;
   updateTts(patch: Partial<TtsSettings>): void;
   updateRealtime(patch: Partial<GoogleRealtimeSettings>): void;
+  updateContent(patch: Partial<Pick<ContentProviderSettings, "webProvider" | "webTransport" | "videoTranscriptProvider" | "videoTransport">>): void;
+  updateContentSecret(provider: "exa" | "supadata", patch: Partial<ContentProviderSettings["exa"]>): void;
+  updateCapabilities(patch: Partial<ModelCapabilitySettings>): void;
   setSubtitlesEnabled(enabled: boolean): void;
   reset(): void;
 }
@@ -54,12 +59,29 @@ type LegacyRealtimeSettings = Omit<Partial<RealtimeSettings>, "google"> & {
   google?: Partial<GoogleRealtimeSettings>;
 };
 
-type PersistedSettings = Partial<Omit<AppSettings, "llm" | "stt" | "tts" | "realtime" | "voiceInteraction">> & {
-  llm?: Partial<LlmSettings>;
-  stt?: Partial<SttSettings>;
-  tts?: Partial<TtsSettings>;
+type LegacyLlmSettings = Omit<Partial<LlmSettings>, "transport"> & {
+  transport?: LlmSettings["transport"] | "proxy";
+};
+
+type LegacySttSettings = Omit<Partial<SttSettings>, "transport"> & {
+  transport?: SttSettings["transport"] | "proxy";
+};
+
+type LegacyTtsSettings = Omit<Partial<TtsSettings>, "transport"> & {
+  transport?: TtsSettings["transport"] | "proxy";
+};
+
+type PersistedSettings = Partial<Omit<AppSettings, "llm" | "stt" | "tts" | "realtime" | "voiceInteraction" | "content" | "capabilities">> & {
+  llm?: LegacyLlmSettings;
+  stt?: LegacySttSettings;
+  tts?: LegacyTtsSettings;
   realtime?: LegacyRealtimeSettings;
   voiceInteraction?: Partial<VoiceInteractionSettings>;
+  content?: Partial<Omit<ContentProviderSettings, "exa" | "supadata">> & {
+    exa?: Partial<ContentProviderSettings["exa"]>;
+    supadata?: Partial<ContentProviderSettings["supadata"]>;
+  };
+  capabilities?: Partial<ModelCapabilitySettings>;
 };
 
 interface PersistedSettingsState {
@@ -76,6 +98,18 @@ interface PersistedSettingsState {
 function isLocalProxyUrl(url: string): boolean {
   const trimmed = url.trim().replace(/\/+$/, "");
   return trimmed === "/api/llm/v1" || trimmed.startsWith("/api/llm/");
+}
+
+function migrateRemoteTransport<T extends { transport?: string; baseUrl?: string }>(
+  saved: T | undefined,
+  fallbackBaseUrl: string,
+): T | undefined {
+  if (!saved || saved.transport !== "proxy") return saved;
+  return {
+    ...saved,
+    transport: "extension",
+    baseUrl: isLocalProxyUrl(saved.baseUrl ?? "") ? fallbackBaseUrl : saved.baseUrl,
+  };
 }
 
 function normalizePersistedRealtime(saved?: LegacyRealtimeSettings): RealtimeSettings {
@@ -105,23 +139,14 @@ function normalizePersistedRealtime(saved?: LegacyRealtimeSettings): RealtimeSet
  * defaults. Exported for focused migration tests; callers should still let the
  * persist middleware own storage reads and writes.
  */
-export function migratePersistedSettings(persisted: unknown, version: number): PersistedSettingsState {
+export function migratePersistedSettings(persisted: unknown, _version: number): PersistedSettingsState {
   const state = (persisted ?? {}) as PersistedSettingsState;
   const saved = state.settings;
   if (!saved) return state;
 
-  let llm = saved.llm;
-  if (version < 3 && llm?.transport === "proxy" && isLocalProxyUrl(llm.baseUrl ?? "")) {
-    llm = {
-      ...llm,
-      baseUrl: "https://api.openai.com/v1",
-      modelId: llm.modelId?.trim() ? llm.modelId : "gpt-4.1-mini",
-    };
-  }
-
-  if (version >= 5) {
-    return llm === saved.llm ? state : { ...state, settings: { ...saved, llm } };
-  }
+  const llm = migrateRemoteTransport(saved.llm, defaultSettings.llm.baseUrl);
+  const stt = migrateRemoteTransport(saved.stt, defaultSettings.stt.baseUrl);
+  const tts = migrateRemoteTransport(saved.tts, defaultSettings.tts.baseUrl);
 
   const handsFree = saved.voiceInteraction?.handsFree
     ?? saved.stt?.continuous
@@ -131,15 +156,23 @@ export function migratePersistedSettings(persisted: unknown, version: number): P
     settings: {
       ...saved,
       llm,
-      version: 3,
+      stt: stt ? { ...stt, continuous: handsFree } : stt,
+      tts,
+      version: 4,
       voiceRoute: saved.voiceRoute === "realtime" ? "realtime" : "classic",
       voiceInteraction: {
         handsFree,
         allowVoiceInterruption: saved.voiceInteraction?.allowVoiceInterruption
           ?? defaultSettings.voiceInteraction.allowVoiceInterruption,
       },
-      stt: saved.stt ? { ...saved.stt, continuous: handsFree } : saved.stt,
       realtime: normalizePersistedRealtime(saved.realtime),
+      content: {
+        ...defaultSettings.content,
+        ...saved.content,
+        exa: { ...defaultSettings.content.exa, ...saved.content?.exa, apiKey: "" },
+        supadata: { ...defaultSettings.content.supadata, ...saved.content?.supadata, apiKey: "" },
+      },
+      capabilities: { ...defaultSettings.capabilities, ...saved.capabilities },
     },
   };
 }
@@ -163,6 +196,17 @@ export const useSettingsStore = create<SettingsStore>()(
               google: {
                 ...settings.realtime.google,
                 apiKey: readSecret("realtime", settings.realtime.google.rememberApiKey),
+              },
+            },
+            content: {
+              ...settings.content,
+              exa: {
+                ...settings.content.exa,
+                apiKey: readSecret("exa", settings.content.exa.rememberApiKey),
+              },
+              supadata: {
+                ...settings.content.supadata,
+                apiKey: readSecret("supadata", settings.content.supadata.rememberApiKey),
               },
             },
           },
@@ -237,13 +281,41 @@ export const useSettingsStore = create<SettingsStore>()(
           },
         }));
       },
+      updateContent(patch) {
+        set((state) => ({
+          settings: {
+            ...state.settings,
+            content: { ...state.settings.content, ...patch },
+          },
+        }));
+      },
+      updateContentSecret(provider, patch) {
+        const next = { ...get().settings.content[provider], ...patch };
+        if (patch.apiKey !== undefined || patch.rememberApiKey !== undefined) {
+          writeSecret(provider, next.apiKey, next.rememberApiKey);
+        }
+        set((state) => ({
+          settings: {
+            ...state.settings,
+            content: { ...state.settings.content, [provider]: next },
+          },
+        }));
+      },
+      updateCapabilities(patch) {
+        set((state) => ({
+          settings: {
+            ...state.settings,
+            capabilities: { ...state.settings.capabilities, ...patch },
+          },
+        }));
+      },
       setSubtitlesEnabled(enabled) {
         set((state) => ({
           settings: { ...state.settings, subtitlesEnabled: enabled },
         }));
       },
       reset() {
-        for (const section of ["llm", "stt", "tts", "realtime"] as const) {
+        for (const section of ["llm", "stt", "tts", "realtime", "exa", "supadata"] as const) {
           localStorage.removeItem(secretKey(section));
           sessionStorage.removeItem(secretKey(section));
         }
@@ -253,9 +325,9 @@ export const useSettingsStore = create<SettingsStore>()(
     {
       name: "live2d-chat:settings:v2",
       // Keep the established key so existing installations are discovered.
-      // Version 5 nests provider-specific settings under realtime.google while
-      // keeping the established storage key and migrating the earlier flat v4.
-      version: 5,
+      // Version 6 removes the Hono proxy transport, adds content providers,
+      // and keeps secrets outside the Zustand JSON payload.
+      version: 6,
       partialize: ({ settings }) => ({
         settings: {
           ...settings,
@@ -266,11 +338,19 @@ export const useSettingsStore = create<SettingsStore>()(
             ...settings.realtime,
             google: { ...settings.realtime.google, apiKey: "" },
           },
+          content: {
+            ...settings.content,
+            exa: { ...settings.content.exa, apiKey: "" },
+            supadata: { ...settings.content.supadata, apiKey: "" },
+          },
         },
       }),
       migrate: migratePersistedSettings,
       merge: (persisted, current) => {
         const saved = (persisted as PersistedSettingsState)?.settings;
+        const llm = migrateRemoteTransport(saved?.llm, defaultSettings.llm.baseUrl) as Partial<LlmSettings> | undefined;
+        const stt = migrateRemoteTransport(saved?.stt, defaultSettings.stt.baseUrl) as Partial<SttSettings> | undefined;
+        const tts = migrateRemoteTransport(saved?.tts, defaultSettings.tts.baseUrl) as Partial<TtsSettings> | undefined;
         const handsFree = saved?.voiceInteraction?.handsFree
           ?? saved?.stt?.continuous
           ?? defaultSettings.voiceInteraction.handsFree;
@@ -280,16 +360,23 @@ export const useSettingsStore = create<SettingsStore>()(
             ...defaultSettings,
             ...saved,
             voiceRoute: saved?.voiceRoute === "realtime" ? "realtime" : "classic",
-            llm: { ...defaultSettings.llm, ...saved?.llm },
-            stt: { ...defaultSettings.stt, ...saved?.stt, continuous: handsFree },
-            tts: { ...defaultSettings.tts, ...saved?.tts },
+            llm: { ...defaultSettings.llm, ...llm },
+            stt: { ...defaultSettings.stt, ...stt, continuous: handsFree },
+            tts: { ...defaultSettings.tts, ...tts },
             realtime: normalizePersistedRealtime(saved?.realtime),
+            content: {
+              ...defaultSettings.content,
+              ...saved?.content,
+              exa: { ...defaultSettings.content.exa, ...saved?.content?.exa, apiKey: "" },
+              supadata: { ...defaultSettings.content.supadata, ...saved?.content?.supadata, apiKey: "" },
+            },
+            capabilities: { ...defaultSettings.capabilities, ...saved?.capabilities },
             voiceInteraction: {
               ...defaultSettings.voiceInteraction,
               ...saved?.voiceInteraction,
               handsFree,
             },
-            version: 3,
+            version: 4,
           },
         };
       },

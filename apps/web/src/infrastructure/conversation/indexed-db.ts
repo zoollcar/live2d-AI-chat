@@ -1,33 +1,13 @@
 import { conversationSchema, type Conversation } from "@/model/conversation";
+import { deleteConversationWithResources } from "@/infrastructure/resources/conversation-cascade";
+import { openLive2dDatabaseV2, RESOURCE_STORE_NAMES } from "@/infrastructure/resources/indexed-db-v2";
 
-const DATABASE_NAME = "live2d-chat";
-const DATABASE_VERSION = 1;
-const CONVERSATIONS_STORE = "conversations";
-const META_STORE = "meta";
+const CONVERSATIONS_STORE = RESOURCE_STORE_NAMES.conversations;
+const META_STORE = RESOURCE_STORE_NAMES.meta;
 const ACTIVE_CONVERSATION_KEY = "activeConversationId";
 
-let databasePromise: Promise<IDBDatabase> | undefined;
-
 function openDatabase(): Promise<IDBDatabase> {
-  databasePromise ??= new Promise((resolve, reject) => {
-    const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
-    request.onupgradeneeded = () => {
-      const database = request.result;
-      if (!database.objectStoreNames.contains(CONVERSATIONS_STORE)) {
-        const store = database.createObjectStore(CONVERSATIONS_STORE, { keyPath: "id" });
-        store.createIndex("updatedAt", "updatedAt");
-      }
-      if (!database.objectStoreNames.contains(META_STORE)) database.createObjectStore(META_STORE);
-    };
-    request.onerror = () => reject(request.error ?? new Error("Unable to open the conversation database."));
-    request.onblocked = () => reject(new Error("Conversation database upgrade is blocked by another tab."));
-    request.onsuccess = () => {
-      const database = request.result;
-      database.onversionchange = () => database.close();
-      resolve(database);
-    };
-  });
-  return databasePromise;
+  return openLive2dDatabaseV2();
 }
 
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
@@ -83,11 +63,20 @@ export async function saveConversations(conversations: readonly Conversation[]):
   await transactionDone(transaction);
 }
 
-export async function deleteConversationRecord(id: string): Promise<void> {
+export async function saveConversationImport(
+  conversations: readonly Conversation[],
+  activeConversationId: string,
+): Promise<void> {
   const database = await openDatabase();
-  const transaction = database.transaction(CONVERSATIONS_STORE, "readwrite");
-  transaction.objectStore(CONVERSATIONS_STORE).delete(id);
+  const transaction = database.transaction([CONVERSATIONS_STORE, META_STORE], "readwrite");
+  const conversationStore = transaction.objectStore(CONVERSATIONS_STORE);
+  for (const conversation of conversations) conversationStore.put(conversationSchema.parse(conversation));
+  transaction.objectStore(META_STORE).put(activeConversationId, ACTIVE_CONVERSATION_KEY);
   await transactionDone(transaction);
+}
+
+export async function deleteConversationRecord(id: string): Promise<void> {
+  await deleteConversationWithResources(id);
 }
 
 export async function saveActiveConversationId(id: string): Promise<void> {

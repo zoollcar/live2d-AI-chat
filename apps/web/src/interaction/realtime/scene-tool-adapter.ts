@@ -1,16 +1,13 @@
-import { createSceneToolRegistry } from "@/agent/tools";
+import { createAgentToolRegistry } from "@/agent/tools";
+import type {
+  AgentNetworkAccess,
+  AgentResourceAccess,
+  AgentToolCapabilities,
+  AgentWorkspaceAccess,
+} from "@/agent/tool-context";
 import type { AgentEvent } from "@/agent/types";
 import type { SceneController } from "@/model/live2d/scene-controller";
 import type { GoogleLiveToolAdapter } from "./types";
-
-interface QueuedSceneToolCall {
-  id: string;
-  name: string;
-  args: unknown;
-  cancelled: boolean;
-  resolve(output: unknown): void;
-  reject(error: Error): void;
-}
 
 function cancelledToolCallError(id: string): Error {
   return new Error(`Google Live tool call ${id} was cancelled.`);
@@ -23,34 +20,22 @@ function cancelledToolCallError(id: string): Error {
 export function createGoogleLiveSceneToolAdapter(
   scene: SceneController,
   emitAgentEvent: (event: AgentEvent) => void,
+  options: {
+    resources?: AgentResourceAccess;
+    workspace?: AgentWorkspaceAccess;
+    network?: AgentNetworkAccess;
+    capabilities?: Partial<AgentToolCapabilities>;
+  } = {},
 ): GoogleLiveToolAdapter {
-  const registry = createSceneToolRegistry(scene, emitAgentEvent);
-  const queue: QueuedSceneToolCall[] = [];
-  let active: QueuedSceneToolCall | undefined;
-
-  const drain = () => {
-    if (active) return;
-    const next = queue.shift();
-    if (!next) return;
-    if (next.cancelled) {
-      next.reject(cancelledToolCallError(next.id));
-      drain();
-      return;
-    }
-    active = next;
-    void registry.execute(next.name, next.args)
-      .then(
-        (output) => {
-          if (next.cancelled) next.reject(cancelledToolCallError(next.id));
-          else next.resolve(output);
-        },
-        next.reject,
-      )
-      .finally(() => {
-        active = undefined;
-        drain();
-      });
-  };
+  const registry = createAgentToolRegistry({
+    scene,
+    emit: emitAgentEvent,
+    resources: options.resources,
+    workspace: options.workspace,
+    network: options.network,
+    capabilities: options.capabilities,
+  });
+  const active = new Map<string, AbortController>();
 
   return {
     declarations: registry.wllamaTools.map(({ function: declaration }) => ({
@@ -62,21 +47,24 @@ export function createGoogleLiveSceneToolAdapter(
       // additionalProperties and uniqueItems.
       parametersJsonSchema: declaration.parameters,
     })),
-    execute: (id, name, args) => new Promise((resolve, reject) => {
-      queue.push({ id, name, args, cancelled: false, resolve, reject });
-      drain();
-    }),
+    execute: (id, name, args) => {
+      const controller = new AbortController();
+      active.get(id)?.abort(cancelledToolCallError(id));
+      active.set(id, controller);
+      const execution = registry.execute(id, name, args, controller.signal)
+        .finally(() => {
+          if (active.get(id) === controller) active.delete(id);
+        });
+      return new Promise((resolve, reject) => {
+        const onAbort = () => reject(controller.signal.reason ?? cancelledToolCallError(id));
+        controller.signal.addEventListener("abort", onAbort, { once: true });
+        void execution.then(resolve, reject).finally(() => {
+          controller.signal.removeEventListener("abort", onAbort);
+        });
+      });
+    },
     cancel: (id) => {
-      if (active?.id === id) {
-        active.cancelled = true;
-        return;
-      }
-      const queued = queue.find((call) => call.id === id);
-      if (!queued) return;
-      queued.cancelled = true;
-      const index = queue.indexOf(queued);
-      queue.splice(index, 1);
-      queued.reject(cancelledToolCallError(id));
+      active.get(id)?.abort(cancelledToolCallError(id));
     },
     resetBatch: registry.resetBatch,
   };

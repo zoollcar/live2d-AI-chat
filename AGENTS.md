@@ -5,9 +5,9 @@
 This repository is a pnpm workspace written in TypeScript.
 
 - `apps/web/`: Vite + React client. Domain code is grouped under `agent/`, `interaction/`, `model/`, `infrastructure/`, and `presentation/`.
-- `apps/api/`: Hono API and LLM proxy. Keep runtime-specific code in `src/adapters/`; shared request handling belongs in `src/app.ts`.
+- `apps/extension/`: WXT Manifest V3 companion extension. Network operations must stay on the strict shared protocol and fixed operation allowlist.
 - `packages/shared/`: types and Zod schemas used by both applications.
-- `api/`: thin Vercel adapter; `apps/web/public/` contains static assets.
+- `apps/web/public/` contains static assets.
 - Tests live beside source files as `*.test.ts`. Generated output under `dist/` must not be edited manually.
 
 ## Build, Test, and Development Commands
@@ -15,13 +15,12 @@ This repository is a pnpm workspace written in TypeScript.
 Use Node.js 22+ and pnpm 11.
 
 - `pnpm install`: install all workspace dependencies.
-- `cp apps/api/.env.example apps/api/.env`: create local API configuration.
-- `pnpm dev`: run the web app on port 5173 and API on port 8787.
-- `pnpm dev:fresh`: clear Vite caches before starting development.
+- `pnpm dev`: run the web app and WXT extension development build.
+- `pnpm dev:fresh`: clear Vite and WXT caches before starting development.
 - `pnpm typecheck`: run TypeScript checks across all packages.
 - `pnpm lint`: run ESLint with zero warnings allowed.
 - `pnpm test` or `pnpm test:coverage`: run Vitest once, optionally with V8 coverage.
-- `pnpm build`: build/check shared, API, and web packages.
+- `pnpm build`: build/check shared, web, and extension packages.
 - `pnpm check`: run the complete typecheck, lint, test, and build gate.
 
 ## Coding Style & Naming Conventions
@@ -38,4 +37,4 @@ Recent commits favor concise, imperative Conventional Commit subjects, usually s
 
 ## Security & Configuration
 
-Never commit API keys. Keep server-controlled LLM endpoints and origin allowlists in `apps/api/.env`. Treat client-side remembered credentials and changes to proxy, CORS, or deployment headers as security-sensitive.
+Never commit API keys. Treat remembered credentials, extension host permissions, bridge operations, CORS behavior, and deployment headers as security-sensitive. Do not expose an arbitrary URL or caller-supplied authentication-header proxy through the extension.

@@ -4,9 +4,13 @@ import { defaultSettings, normalizeBaseUrl } from "./defaults";
 describe("client configuration", () => {
   it.each([
     ["https://api.openai.com/v1/", "https://api.openai.com/v1"],
-    [" /api/llm/v1/// ", "/api/llm/v1"],
+    [" localhost:11434/v1/// ", "http://localhost:11434/v1"],
   ])("normalizes %s", (input, expected) => {
     expect(normalizeBaseUrl(input)).toBe(expected);
+  });
+
+  it("rejects the retired relative backend URL", () => {
+    expect(() => normalizeBaseUrl(" /api/llm/v1/// ")).toThrow("must be absolute");
   });
 
   it("keeps API keys session-only by default", () => {

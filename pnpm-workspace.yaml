@@ -5,8 +5,9 @@ allowBuilds:
   '@swc/core': true
   esbuild: true
   protobufjs: true
+  # officeparser includes an optional OCR dependency. OCR is deliberately out
+  # of scope, so its install script must never download/build extra payloads.
+  tesseract.js: false
 minimumReleaseAgeExclude:
   - '@ai-sdk/gateway@4.0.64'
-  - '@hono/node-server@2.1.1'
   - ai@7.0.79
-  - hono@4.13.5

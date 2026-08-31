@@ -34,6 +34,7 @@ describe("ChromeAgentRuntime", () => {
       scene: {} as SceneController,
       signal: new AbortController().signal,
       emit: (event) => events.push(event),
+      toolCapabilities: { inspectImage: true },
     });
 
     const createOptions = create.mock.calls[0][0] as LanguageModelCreateOptions;
@@ -43,7 +44,17 @@ describe("ChromeAgentRuntime", () => {
       "setDecorations",
       "performAction",
       "setStageLayout",
+      "listResources",
+      "readResource",
+      "readWebPage",
+      "readVideoTranscript",
+      "showResourceOnStage",
+      "closeStageContent",
+      "drawSvgOnStage",
+      "sendSticker",
+      "inspectImage",
     ]);
+    expect(createOptions.expectedInputs).toEqual([{ type: "image" }, { type: "text" }]);
     expect(promptStreaming).toHaveBeenCalledWith("Hello", expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(events.filter((event) => event.type === "text-delta")).toEqual([
       { type: "text-delta", delta: "Hello" },

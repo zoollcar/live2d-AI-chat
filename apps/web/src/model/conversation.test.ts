@@ -8,7 +8,7 @@ import {
 } from "./conversation";
 
 const modelSnapshot = {
-  transport: "proxy" as const,
+  transport: "extension" as const,
   baseUrl: "https://api.openai.com/v1",
   modelId: "gpt-4.1-mini",
 };
@@ -62,7 +62,7 @@ describe("conversation persistence", () => {
         createdAt: 10,
         updatedAt: 20,
         characterId: "ai-secretary",
-        model: modelSnapshot,
+        model: { ...modelSnapshot, transport: "proxy" },
         messages: [{ role: "user", content: "Hello" }],
       }],
     }));

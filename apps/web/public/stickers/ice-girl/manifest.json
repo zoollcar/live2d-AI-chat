@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "characterId": "ice-girl",
+  "stickers": [
+    { "stickerId": "ice-girl-joy", "name": "Joy", "path": "/stickers/ice-girl/joy.png", "alt": "Ice Girl smiling brightly" },
+    { "stickerId": "ice-girl-laugh", "name": "Laugh", "path": "/stickers/ice-girl/laugh.png", "alt": "Ice Girl laughing" },
+    { "stickerId": "ice-girl-love", "name": "Love", "path": "/stickers/ice-girl/love.png", "alt": "Ice Girl making a heart gesture" },
+    { "stickerId": "ice-girl-shy", "name": "Shy", "path": "/stickers/ice-girl/shy.png", "alt": "Ice Girl looking shy" },
+    { "stickerId": "ice-girl-surprised", "name": "Surprised", "path": "/stickers/ice-girl/surprised.png", "alt": "Ice Girl looking surprised" },
+    { "stickerId": "ice-girl-confused", "name": "Confused", "path": "/stickers/ice-girl/confused.png", "alt": "Ice Girl thinking in confusion" },
+    { "stickerId": "ice-girl-angry", "name": "Angry", "path": "/stickers/ice-girl/angry.png", "alt": "Ice Girl looking angry" },
+    { "stickerId": "ice-girl-sad", "name": "Sad", "path": "/stickers/ice-girl/sad.png", "alt": "Ice Girl looking sad" },
+    { "stickerId": "ice-girl-crying", "name": "Crying", "path": "/stickers/ice-girl/crying.png", "alt": "Ice Girl crying" },
+    { "stickerId": "ice-girl-proud", "name": "Proud", "path": "/stickers/ice-girl/proud.png", "alt": "Ice Girl posing proudly" },
+    { "stickerId": "ice-girl-sleepy", "name": "Sleepy", "path": "/stickers/ice-girl/sleepy.png", "alt": "Ice Girl sleeping" },
+    { "stickerId": "ice-girl-cheering", "name": "Cheering", "path": "/stickers/ice-girl/cheering.png", "alt": "Ice Girl cheering" }
+  ]
+}

@@ -1,7 +1,7 @@
 import { isStepCount, ToolLoopAgent, type ModelMessage } from "ai";
 import { createRemoteLanguageModel } from "./language-model";
 import { SYSTEM_MESSAGE } from "./system-prompt";
-import { createSceneToolRegistry } from "./tools";
+import { createAgentToolRegistry } from "./tools";
 import type { AgentRunOptions, AgentRuntime } from "./types";
 
 // Upper bound on ReAct steps for a single user turn. Mirrors the
@@ -14,7 +14,14 @@ export class RemoteAgentRuntime implements AgentRuntime {
     const { settings, scene, emit, signal } = options;
     try {
       emit({ type: "status", kind: "busy", message: "Connecting to the language model…" });
-      const { aiTools, resetBatch } = createSceneToolRegistry(scene, emit);
+      const { aiTools, resetBatch } = createAgentToolRegistry({
+        scene,
+        emit,
+        resources: options.resources,
+        workspace: options.workspace,
+        network: options.network,
+        capabilities: options.toolCapabilities,
+      });
       // The AI SDK 7+ no longer allows system messages inside `messages` —
       // they have to travel through the agent's `instructions` option or the
       // call throws `AI_InvalidPromptError`. Pull every system message out of

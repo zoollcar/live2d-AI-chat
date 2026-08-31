@@ -1,5 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createAgentRuntime, type AgentEvent, type ChatMessage } from "@/agent";
+import {
+  getChromePromptApiAvailability,
+  isChromePromptApiSupported,
+} from "@/agent/chrome-prompt-api";
 import { summarizeConversation } from "@/agent/conversation-summarizer";
 import { prefixAgentStatus } from "@/agent/status-context";
 import type { StatusKind } from "@/agent/types";
@@ -8,6 +12,17 @@ import { useCharacterStore } from "@/infrastructure/character/store";
 import { useSettingsStore } from "@/infrastructure/config/store";
 import { useConversationStore, type NewConversationInput } from "@/infrastructure/conversation/store";
 import { createLogger } from "@/infrastructure/log";
+import {
+  buildAttachmentPrompt,
+  createConversationResourceController,
+  resourceRepository,
+  type ConversationResourceController,
+} from "@/infrastructure/resources";
+import {
+  createCurrentModelImageInspector,
+  resolveImageInspectionCapability,
+} from "@/infrastructure/vision";
+import { isDirectCorsGuidanceError } from "@/infrastructure/network/direct-fetch";
 import { createSttProvider, type SpeechRecognitionProvider } from "@/interaction/stt";
 import { SpeechQueue } from "@/interaction/speech/speech-queue";
 import { SentenceSegmenter } from "@/interaction/speech/sentence-segmenter";
@@ -16,7 +31,14 @@ import type { CharacterProfile } from "@/model/character-profile";
 import { createModelSnapshot } from "@/model/conversation";
 import { buildRuntimeConversationMessages, planConversationCompaction } from "@/model/conversation-compaction";
 import type { SceneController } from "@/model/live2d/scene-controller";
-import type { LlmSettings } from "@live2d-chat/shared";
+import type { ArtifactRef, LlmSettings, ResourceRef, StageLayoutId } from "@live2d-chat/shared";
+import {
+  extractComposerUrls,
+  MessageComposer,
+  type ComposerAttachment,
+} from "@/presentation/composer/MessageComposer";
+import { StageWorkspaceDesktop } from "@/presentation/stage-desktop";
+import type { StageArtifact, StageLayoutLease } from "@/model/stage-workspace";
 import { Live2DStage } from "@/presentation/stage/Live2DStage";
 import { useGoogleRealtime } from "./use-google-realtime";
 
@@ -57,6 +79,14 @@ function latestVisibleMessage(messages: readonly ChatMessage[], fallback: string
   return fallback;
 }
 
+function artifactRefFromToolOutput(output: unknown): ArtifactRef | undefined {
+  if (!output || typeof output !== "object") return undefined;
+  const value = output as Partial<ArtifactRef>;
+  if (typeof value.id !== "string" || typeof value.resourceId !== "string") return undefined;
+  if (value.kind !== "resource-view" && value.kind !== "svg-drawing" && value.kind !== "sticker") return undefined;
+  return { id: value.id, resourceId: value.resourceId, kind: value.kind };
+}
+
 export default function App() {
   const { settings, hydrated, hydrateSecrets } = useSettingsStore();
   const { profiles, activeProfileId, setActiveProfile } = useCharacterStore();
@@ -87,8 +117,17 @@ export default function App() {
     ...(activeProfile.voice.rate !== undefined ? { rate: activeProfile.voice.rate } : {}),
     ...(activeProfile.voice.pitch !== undefined ? { pitch: activeProfile.voice.pitch } : {}),
   }), [activeProfile.voice, settings.tts]);
+  const [chromeImageInputSupported, setChromeImageInputSupported] = useState(false);
+  const imageInspectionCapability = useMemo(
+    () => resolveImageInspectionCapability(conversationLlmSettings, settings.capabilities, {
+      chromeImageInputSupported,
+    }),
+    [chromeImageInputSupported, conversationLlmSettings, settings.capabilities],
+  );
   const [scene, setScene] = useState<SceneController>();
   const [input, setInput] = useState("");
+  const [pendingAttachments, setPendingAttachments] = useState<ComposerAttachment[]>([]);
+  const [resourceController, setResourceController] = useState<ConversationResourceController>();
   const [subtitle, setSubtitle] = useState("Loading the Live2D model…");
   const [status, setStatus] = useState<Status>({ kind: "busy", message: "Initializing stage" });
   const [memoryStatus, setMemoryStatus] = useState<MemoryStatus>();
@@ -97,6 +136,18 @@ export default function App() {
   const [running, setRunning] = useState(false);
   const realtimeNeedsConfiguration = settings.voiceRoute === "realtime"
     && !settings.realtime.google.apiKey.trim();
+
+  useEffect(() => {
+    let active = true;
+    setChromeImageInputSupported(false);
+    if (conversationLlmSettings.transport !== "chrome" || settings.capabilities.vision === "disabled") {
+      return () => { active = false; };
+    }
+    void getChromePromptApiAvailability({ inspectImage: true }).then((availability) => {
+      if (active) setChromeImageInputSupported(isChromePromptApiSupported(availability));
+    });
+    return () => { active = false; };
+  }, [conversationLlmSettings.transport, settings.capabilities.vision]);
   const abortRef = useRef<AbortController | undefined>(undefined);
   const sttRef = useRef<SpeechRecognitionProvider | undefined>(undefined);
   const speechQueueRef = useRef<SpeechQueue | undefined>(undefined);
@@ -119,8 +170,100 @@ export default function App() {
   const activeConversationRef = useRef(activeConversation);
   const compactionControllersRef = useRef(new Map<string, AbortController>());
   const memoryStatusTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const resourceControllerRef = useRef<ConversationResourceController | undefined>(undefined);
+  const hiddenComposerResourcesRef = useRef(new Set<string>());
+  const pendingAttachmentsRef = useRef<ComposerAttachment[]>([]);
+  const attachmentSlotsInFlightRef = useRef(0);
+  const recognizedUrlAttachmentsRef = useRef(new Map<string, {
+    state: "attaching" | "attached";
+    resourceId?: string;
+  }>());
+  const automaticStageLayoutRef = useRef<{
+    original: StageLayoutId;
+    applied: StageLayoutId;
+    appliedRevision: number;
+  } | undefined>(undefined);
 
   useEffect(() => { activeConversationRef.current = activeConversation; }, [activeConversation]);
+  useEffect(() => { pendingAttachmentsRef.current = pendingAttachments; }, [pendingAttachments]);
+
+  const updatePendingAttachments = useCallback((
+    updater: (current: readonly ComposerAttachment[]) => ComposerAttachment[],
+  ) => {
+    const next = updater(pendingAttachmentsRef.current);
+    pendingAttachmentsRef.current = next;
+    setPendingAttachments(next);
+  }, []);
+
+  useEffect(() => {
+    hiddenComposerResourcesRef.current.clear();
+    const storedConversation = useConversationStore.getState().conversations.find((conversation) =>
+      conversation.id === activeConversationId);
+    for (const message of storedConversation?.messages ?? []) {
+      for (const attachment of message.attachments ?? []) {
+        hiddenComposerResourcesRef.current.add(attachment.id);
+      }
+    }
+    recognizedUrlAttachmentsRef.current.clear();
+    attachmentSlotsInFlightRef.current = 0;
+    updatePendingAttachments(() => []);
+    if (!activeConversationId) return;
+    const inspector = createCurrentModelImageInspector({
+      repository: resourceRepository,
+      settings: conversationLlmSettings,
+      capabilities: settings.capabilities,
+      chromeImageInputSupported,
+    });
+    const controller = createConversationResourceController({
+      conversationId: activeConversationId,
+      contentSettings: settings.content,
+      ...(inspector.capability.available ? { inspectImage: inspector.inspect } : {}),
+      onUpdate: ({ resource, errorMessage }) => {
+        if (resourceControllerRef.current !== controller) return;
+        if (errorMessage && isDirectCorsGuidanceError(new Error(errorMessage))) setSettingsOpen(true);
+        if (hiddenComposerResourcesRef.current.has(resource.id)) {
+          // Processing web pages and transcripts may be sent before the
+          // provider finishes. Keep the history reference synchronized with
+          // the authoritative resource record so status/title/size do not
+          // remain frozen at the moment the message was submitted.
+          setMessages((current) => current.map((message) => {
+            if (!message.attachments?.some((attachment) => attachment.id === resource.id)) return message;
+            return {
+              ...message,
+              attachments: message.attachments.map((attachment) =>
+                attachment.id === resource.id ? resource : attachment),
+            };
+          }));
+          return;
+        }
+        updatePendingAttachments((current) => {
+          const existing = current.findIndex((attachment) => attachment.id === resource.id);
+          const next: ComposerAttachment = { ...resource, errorMessage };
+          if (existing < 0) return [...current, next].slice(-10);
+          return current.map((attachment, index) => index === existing ? next : attachment);
+        });
+      },
+      onNotification: (message) => {
+        if (resourceControllerRef.current !== controller) return;
+        setStatus({ kind: "idle", message });
+      },
+    });
+    resourceControllerRef.current = controller;
+    setResourceController(controller);
+    return () => {
+      if (resourceControllerRef.current === controller) resourceControllerRef.current = undefined;
+      controller.dispose();
+      setResourceController((current) => current === controller ? undefined : current);
+    };
+  }, [
+    activeConversationId,
+    chromeImageInputSupported,
+    conversationLlmSettings,
+    setMessages,
+    settings.capabilities,
+    settings.content,
+    updatePendingAttachments,
+  ]);
 
   useEffect(() => {
     if (!hydrated) hydrateSecrets();
@@ -184,6 +327,11 @@ export default function App() {
     speechQueueRef.current = new SpeechQueue(provider, effectiveTtsSettings, scene, (sentence) => {
       setSubtitle(sentence);
       setStatus({ kind: "busy", message: "AI is speaking" });
+    }, (error) => {
+      if (effectiveTtsSettings.transport === "direct" && isDirectCorsGuidanceError(error)) {
+        setSettingsOpen(true);
+      }
+      setStatus({ kind: "error", message: `Speech synthesis error: ${error.message}` });
     });
     return () => speechQueueRef.current?.cancel();
   }, [effectiveTtsSettings, scene, settings.voiceRoute]);
@@ -213,6 +361,10 @@ export default function App() {
     conversation: activeConversation,
     settings: settings.realtime,
     interaction: settings.voiceInteraction,
+    resources: resourceController?.resources,
+    workspace: resourceController?.workspace,
+    network: resourceController?.network,
+    toolCapabilities: { inspectImage: imageInspectionCapability.available },
     callbacks: {
       setListening: (value) => {
         listeningRef.current = value;
@@ -289,9 +441,12 @@ export default function App() {
     return () => { cancelled = true; };
   }, [activeConversation?.id, activeProfile, scene, stopEverything]);
 
-  const sendClassicMessage = useCallback(async (rawText: string) => {
+  const sendClassicMessage = useCallback(async (
+    rawText: string,
+    attachments: readonly ResourceRef[] = [],
+  ) => {
     const text = rawText.trim();
-    if (!text || !scene) return;
+    if ((!text && attachments.length === 0) || !scene) return;
     if (conversationLlmSettings.transport === "local" && activeConversationId) {
       compactionControllersRef.current.get(activeConversationId)?.abort();
     }
@@ -313,6 +468,7 @@ export default function App() {
       role: "user",
       content: text,
       inputMode: userTypedRef.current ? "text" : "voice",
+      ...(attachments.length ? { attachments: [...attachments] } : {}),
     };
     const history: ChatMessage[] = [...messagesRef.current, userMessage];
     const contextHistory = activeConversationRef.current
@@ -323,7 +479,10 @@ export default function App() {
     // the end of the multi-turn prompt to preserve the longest stable prefix.
     const runtimeHistory: ChatMessage[] = [
       ...contextHistory,
-      { ...userMessage, content: prefixAgentStatus(text, scene.snapshot()) },
+      {
+        ...userMessage,
+        content: prefixAgentStatus(buildAttachmentPrompt(text, attachments), scene.snapshot()),
+      },
     ];
     setMessages(() => [...history, { role: "assistant", content: "" }]);
     setInput("");
@@ -373,7 +532,7 @@ export default function App() {
           const next = [...current];
           const last = next.at(-1);
           if (last?.role === "assistant") {
-            const toolCalls = [...(last.toolCalls ?? []), { name: event.name, input: event.input }];
+            const toolCalls = [...(last.toolCalls ?? []), { callId: event.callId, name: event.name, input: event.input }];
             next[next.length - 1] = { ...last, toolCalls };
           }
           return next;
@@ -383,28 +542,53 @@ export default function App() {
         // chat history can show the input/output pair. The local runtime
         // runs tools sequentially and emits `tool-result` in execution order;
         // the remote runtime can fire them in parallel but each `tool-result`
-        // event still carries the matching `name`. The last record whose
-        // `name` matches and `output` is still unset is the one we just
-        // finished.
+        // event carries the provider callId, so duplicate concurrent calls
+        // to the same tool cannot steal each other's results.
         setMessages((current) => {
           const next = [...current];
           const last = next.at(-1);
           if (last?.role === "assistant" && last.toolCalls) {
-            const toolCalls = last.toolCalls.map((record, index, records) => {
-              if (record.name !== event.name) return record;
-              if (record.output !== undefined) return record;
-              // Guard against out-of-order results: only attach if this is
-              // the earliest unmatched record with this name.
-              const earlierUnmatched = records
-                .slice(0, index)
-                .some((other) => other.name === event.name && other.output === undefined);
-              return earlierUnmatched ? record : { ...record, output: event.output };
-            });
-            next[next.length - 1] = { ...last, toolCalls };
+            const toolCalls = last.toolCalls.map((record) =>
+              record.callId === event.callId ? { ...record, output: event.output } : record);
+            const artifact = artifactRefFromToolOutput(event.output);
+            next[next.length - 1] = {
+              ...last,
+              toolCalls,
+              ...(artifact ? { artifacts: [...(last.artifacts ?? []), artifact] } : {}),
+            };
+          }
+          return next;
+        });
+      } else if (event.type === "tool-error") {
+        setMessages((current) => {
+          const next = [...current];
+          const last = next.at(-1);
+          if (last?.role === "assistant" && last.toolCalls) {
+            next[next.length - 1] = {
+              ...last,
+              toolCalls: last.toolCalls.map((record) =>
+                record.callId === event.callId ? { ...record, error: event.error } : record),
+            };
+          }
+          return next;
+        });
+      } else if (event.type === "tool-cancel") {
+        setMessages((current) => {
+          const next = [...current];
+          const last = next.at(-1);
+          if (last?.role === "assistant" && last.toolCalls) {
+            next[next.length - 1] = {
+              ...last,
+              toolCalls: last.toolCalls.map((record) =>
+                record.callId === event.callId ? { ...record, canceled: true } : record),
+            };
           }
           return next;
         });
       } else if (event.type === "error") {
+        if (conversationLlmSettings.transport === "direct" && isDirectCorsGuidanceError(event.error)) {
+          setSettingsOpen(true);
+        }
         setStatus({ kind: "error", message: `Error: ${event.error.message}` });
         setRunning(false);
         void flushActiveConversation();
@@ -430,22 +614,37 @@ export default function App() {
       }
     };
 
-    await runtime.run({ messages: runtimeHistory, settings: conversationLlmSettings, scene, signal: controller.signal, emit });
+    await runtime.run({
+      messages: runtimeHistory,
+      settings: conversationLlmSettings,
+      scene,
+      resources: resourceController?.resources,
+      workspace: resourceController?.workspace,
+      network: resourceController?.network,
+      toolCapabilities: { inspectImage: imageInspectionCapability.available },
+      signal: controller.signal,
+      emit,
+    });
   }, [
     activeConversationId,
     conversationLlmSettings,
     flushActiveConversation,
     interruptPlayback,
+    imageInspectionCapability.available,
+    resourceController,
     scene,
     setMessages,
     settings.voiceInteraction.allowVoiceInterruption,
   ]);
 
-  const sendMessage = useCallback(async (text: string) => {
+  const sendMessage = useCallback(async (
+    text: string,
+    attachments: readonly ResourceRef[] = [],
+  ) => {
     try {
       if (settings.voiceRoute === "realtime") {
         try {
-          await sendRealtimeText(text);
+          await sendRealtimeText(text, attachments, buildAttachmentPrompt(text, attachments));
         } finally {
           // Realtime records the input mode in its own turn state. Do not let
           // this classic-route guard leak into a later voice turn after a
@@ -453,7 +652,7 @@ export default function App() {
           userTypedRef.current = false;
         }
       } else {
-        await sendClassicMessage(text);
+        await sendClassicMessage(text, attachments);
       }
     } catch (error) {
       setStatus({
@@ -473,7 +672,7 @@ export default function App() {
   // callbacks that close over `messages` at that instant; subsequent turns
   // would then build history from the stale array and either repeat the first
   // exchange or send a history missing the LLM's previous reply.
-  const sendMessageRef = useRef<((text: string) => Promise<void>) | undefined>(undefined);
+  const sendMessageRef = useRef<((text: string, attachments?: readonly ResourceRef[]) => Promise<void>) | undefined>(undefined);
 
   const startListening = useCallback(async () => {
     if (running && !settings.voiceInteraction.allowVoiceInterruption) {
@@ -525,6 +724,7 @@ export default function App() {
         },
         onError: (error) => {
           log.error("onError", { message: error.message });
+          if (settings.stt.transport === "direct" && isDirectCorsGuidanceError(error)) setSettingsOpen(true);
           setStatus({ kind: "error", message: `Speech recognition error: ${error.message}` });
           setListening(false);
           listeningRef.current = false;
@@ -606,10 +806,128 @@ export default function App() {
   // (and Chrome's no-speech `onAutoEnd`) leave the mic off until the user
   // clicks it again. Called from both the form submit and the textarea
   // Enter-key path.
-  const submitTypedMessage = useCallback((text: string) => {
+  const submitTypedMessage = useCallback((text: string, attachments: readonly ResourceRef[] = []) => {
     userTypedRef.current = true;
-    void sendMessage(text);
+    void sendMessage(text, attachments);
   }, [sendMessage]);
+
+  const attachFiles = useCallback(async (files: readonly File[]) => {
+    const controller = resourceControllerRef.current;
+    if (!controller || files.length === 0) return;
+    if (pendingAttachmentsRef.current.length + attachmentSlotsInFlightRef.current + files.length > 10) {
+      setStatus({ kind: "error", message: "A message can contain at most 10 attachments" });
+      return;
+    }
+    attachmentSlotsInFlightRef.current += files.length;
+    setStatus({ kind: "busy", message: `Processing ${files.length} attachment${files.length === 1 ? "" : "s"}` });
+    try {
+      const attached = await controller.attachFiles(files);
+      if (resourceControllerRef.current !== controller) return;
+      const ready = attached.filter((resource) => resource.status === "ready");
+      for (const resource of ready) {
+        if (resourceControllerRef.current !== controller) return;
+        await controller.showResource(resource.id);
+      }
+      if (resourceControllerRef.current !== controller) return;
+      if (ready.some((resource) => resource.kind === "image") && !imageInspectionCapability.available) {
+        setStatus({
+          kind: "idle",
+          message: "Image preview ready; the current model does not support image inspection",
+        });
+      } else {
+        setStatus({ kind: "idle", message: `${ready.length} attachment${ready.length === 1 ? "" : "s"} ready` });
+      }
+    } catch (error) {
+      if (resourceControllerRef.current !== controller) return;
+      setStatus({
+        kind: "error",
+        message: error instanceof Error ? error.message : "The attachments could not be processed.",
+      });
+    } finally {
+      if (resourceControllerRef.current === controller) {
+        attachmentSlotsInFlightRef.current = Math.max(0, attachmentSlotsInFlightRef.current - files.length);
+      }
+    }
+  }, [imageInspectionCapability.available]);
+
+  const attachRecognizedUrls = useCallback(async (urls: readonly string[]) => {
+    const controller = resourceControllerRef.current;
+    if (!controller || urls.length === 0) return;
+    const uniqueUrls = urls.filter((url) => !recognizedUrlAttachmentsRef.current.has(url));
+    if (uniqueUrls.length === 0) return;
+    if (pendingAttachmentsRef.current.length + attachmentSlotsInFlightRef.current + uniqueUrls.length > 10) {
+      setStatus({ kind: "error", message: "A message can contain at most 10 attachments" });
+      return;
+    }
+    attachmentSlotsInFlightRef.current += uniqueUrls.length;
+    for (const url of uniqueUrls) recognizedUrlAttachmentsRef.current.set(url, { state: "attaching" });
+    for (const url of uniqueUrls) {
+      try {
+        const resource = await controller.attachUrl(url);
+        if (resourceControllerRef.current !== controller) return;
+        recognizedUrlAttachmentsRef.current.set(url, { state: "attached", resourceId: resource.id });
+        if (hiddenComposerResourcesRef.current.has(resource.id)) continue;
+        updatePendingAttachments((current) => current.some((attachment) => attachment.id === resource.id)
+          ? [...current]
+          : [...current, resource].slice(-10));
+      } catch (error) {
+        if (resourceControllerRef.current !== controller) return;
+        recognizedUrlAttachmentsRef.current.delete(url);
+        setStatus({
+          kind: "error",
+          message: error instanceof Error ? error.message : "The link could not be added.",
+        });
+      } finally {
+        if (resourceControllerRef.current === controller) {
+          attachmentSlotsInFlightRef.current = Math.max(0, attachmentSlotsInFlightRef.current - 1);
+        }
+      }
+    }
+  }, [updatePendingAttachments]);
+
+  const removePendingAttachment = useCallback((resourceId: string) => {
+    hiddenComposerResourcesRef.current.add(resourceId);
+    for (const [url, attachment] of recognizedUrlAttachmentsRef.current) {
+      if (attachment.resourceId === resourceId) recognizedUrlAttachmentsRef.current.delete(url);
+    }
+    updatePendingAttachments((current) => current.filter((attachment) => attachment.id !== resourceId));
+    void resourceControllerRef.current?.removeResource(resourceId).catch(() => undefined);
+  }, [updatePendingAttachments]);
+
+  const submitComposerMessage = useCallback(async () => {
+    const recognizedUrls = extractComposerUrls(input);
+    const missingUrls = recognizedUrls.filter((url) => !recognizedUrlAttachmentsRef.current.has(url));
+    if (missingUrls.length > 0) {
+      setStatus({ kind: "busy", message: "Adding linked content before sending" });
+      await attachRecognizedUrls(missingUrls);
+      setStatus({ kind: "idle", message: "Link added; send when its content is ready" });
+      return;
+    }
+    if (recognizedUrls.some((url) => recognizedUrlAttachmentsRef.current.get(url)?.state === "attaching")) {
+      setStatus({ kind: "busy", message: "Linked content is still being added" });
+      return;
+    }
+    const currentAttachments = pendingAttachmentsRef.current;
+    const urlResourceIds = recognizedUrls.flatMap((url) => {
+      const resourceId = recognizedUrlAttachmentsRef.current.get(url)?.resourceId;
+      return resourceId ? [resourceId] : [];
+    });
+    if (urlResourceIds.some((resourceId) => {
+      const attachment = currentAttachments.find((candidate) => candidate.id === resourceId);
+      return !attachment || attachment.status === "error";
+    })) {
+      setStatus({ kind: "error", message: "Retry or remove the failed linked content before sending" });
+      return;
+    }
+    const attachments = currentAttachments.filter((attachment) => attachment.status === "ready"
+      || ((attachment.status === "pending" || attachment.status === "processing")
+        && (attachment.kind === "web" || attachment.kind === "video-transcript")));
+    if (!input.trim() && attachments.length === 0) return;
+    for (const attachment of currentAttachments) hiddenComposerResourcesRef.current.add(attachment.id);
+    recognizedUrlAttachmentsRef.current.clear();
+    updatePendingAttachments(() => []);
+    submitTypedMessage(input, attachments);
+  }, [attachRecognizedUrls, input, submitTypedMessage, updatePendingAttachments]);
 
   const onMicButtonClick = useCallback(async () => {
     if (settings.voiceRoute === "realtime") {
@@ -674,6 +992,61 @@ export default function App() {
     setStatus({ kind: "error", message: `Model failed to load: ${error.message}` });
   }, []);
 
+  const onStageLayoutLease = useCallback((lease: StageLayoutLease) => {
+    if (!scene) return;
+    if (lease.reason === "artifact-focus") {
+      if (automaticStageLayoutRef.current) return;
+      const original = scene.snapshot().layout;
+      const applied: StageLayoutId = lease.characterSide === "left"
+        ? "half-body-left"
+        : "half-body-right";
+      if (original !== applied) scene.setStageLayout(applied);
+      automaticStageLayoutRef.current = {
+        original,
+        applied,
+        appliedRevision: scene.snapshot().layoutRevision,
+      };
+      return;
+    }
+    const automatic = automaticStageLayoutRef.current;
+    automaticStageLayoutRef.current = undefined;
+    const current = scene.snapshot();
+    if (automatic
+      && automatic.original !== automatic.applied
+      && current.layout === automatic.applied
+      && current.layoutRevision === automatic.appliedRevision) {
+      scene.setStageLayout(automatic.original);
+    }
+  }, [scene]);
+
+  const onCloseStageArtifact = useCallback((artifactId: string, expectedLayoutRevision: number) => {
+    return resourceControllerRef.current?.closeArtifact(artifactId, expectedLayoutRevision) ?? false;
+  }, []);
+
+  const onCancelStageArtifact = useCallback((artifactId: string) => {
+    void resourceRepository.getArtifact(artifactId).then((artifact) => {
+      if (artifact) resourceControllerRef.current?.cancelResource(artifact.resourceId);
+    });
+  }, []);
+
+  const onRetryStageArtifact = useCallback((artifactId: string) => {
+    void resourceRepository.getArtifact(artifactId).then((artifact) => {
+      if (!artifact) return;
+      return resourceControllerRef.current?.retryResource(artifact.resourceId);
+    }).catch((error) => {
+      setStatus({ kind: "error", message: error instanceof Error ? error.message : "Retry failed" });
+    });
+  }, []);
+
+  const onOpenStageSource = useCallback((artifact: StageArtifact) => {
+    const source = artifact.source?.url;
+    if (!source) return;
+    const parsed = new URL(source);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return;
+    const opened = window.open(parsed.toString(), "_blank", "noopener,noreferrer");
+    if (opened) opened.opener = null;
+  }, []);
+
   const onCreateConversation = useCallback(async () => {
     stopEverything();
     await createConversation(conversationSeed(activeProfile, settings.llm));
@@ -715,6 +1088,15 @@ export default function App() {
       <div className="ambient ambient-one" />
       <div className="ambient ambient-two" />
       <Live2DStage onReady={onStageReady} onError={onStageError} />
+      <StageWorkspaceDesktop
+        characterSide="right"
+        restingCharacterSide="center"
+        onLayoutLease={onStageLayoutLease}
+        onCloseArtifact={onCloseStageArtifact}
+        onCancelArtifact={onCancelStageArtifact}
+        onRetryArtifact={onRetryStageArtifact}
+        onOpenArtifactSource={onOpenStageSource}
+      />
 
       <header className="top-bar glass-panel">
         <div className="brand">
@@ -764,22 +1146,24 @@ export default function App() {
 
       {settings.subtitlesEnabled && subtitle && <div className="subtitle">{subtitle}</div>}
 
-      <form className="composer glass-panel" onSubmit={(event) => { event.preventDefault(); submitTypedMessage(input); }}>
-        <button type="button" className={`mic-button ${listening ? "active" : ""} ${running && !listening ? "interrupting" : ""}`} onClick={() => void onMicButtonClick()} aria-label={listening ? "Stop listening" : running ? "Interrupt AI" : "Start listening"}>●</button>
-        <textarea rows={1} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault();
-            submitTypedMessage(input);
-          }
-        }} placeholder="Type a message…" />
-        {running ? (
-          <button type="button" className="send-button stop" onClick={() => {
+      <MessageComposer
+        value={input}
+        attachments={pendingAttachments}
+        listening={listening}
+        running={running}
+        sceneReady={Boolean(scene && resourceController)}
+        onChange={setInput}
+        onFiles={(files) => void attachFiles(files)}
+        onRecognizedUrls={(urls) => void attachRecognizedUrls(urls)}
+        onRemoveAttachment={removePendingAttachment}
+        onMic={() => void onMicButtonClick()}
+        onStop={() => {
             continuousRef.current = false;
             if (settings.voiceRoute === "realtime") void stopRealtimeEverything();
             else stopEverything();
-          }}>■</button>
-        ) : <button className="send-button" disabled={!scene || !input.trim()}>↑</button>}
-      </form>
+          }}
+        onSubmit={() => void submitComposerMessage()}
+      />
 
       {settingsOpen ? (
         <Suspense fallback={<div className="settings-loading">Loading settings…</div>}>
