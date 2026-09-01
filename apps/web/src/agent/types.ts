@@ -1,6 +1,6 @@
 import type { ArtifactRef, LlmSettings, ResourceRef } from "@live2d-chat/shared";
 import type { SceneController } from "@/model/live2d/scene-controller";
-import type { AgentNetworkAccess, AgentResourceAccess, AgentToolCapabilities, AgentWorkspaceAccess } from "./tool-context";
+import type { AgentNetworkAccess, AgentResourceAccess, AgentToolCapabilities, AgentToolName, AgentWorkspaceAccess } from "./tool-context";
 
 /**
  * A tool invocation captured during an assistant turn. The runtime emits a
@@ -92,6 +92,7 @@ export interface AgentRunOptions {
   workspace?: AgentWorkspaceAccess;
   network?: AgentNetworkAccess;
   toolCapabilities?: Partial<AgentToolCapabilities>;
+  enabledTools?: readonly AgentToolName[];
   signal: AbortSignal;
   emit(event: AgentEvent): void;
 }

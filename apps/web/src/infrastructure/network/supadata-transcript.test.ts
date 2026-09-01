@@ -21,10 +21,9 @@ const completed = {
 };
 
 describe("Supadata transcript provider", () => {
-  it("returns timestamped cues from an immediate direct response", async () => {
+  it("returns timestamped cues from an immediate response", async () => {
     const directFetch = vi.fn(async () => jsonResponse(completed)) as unknown as typeof fetch;
     const provider = createSupadataTranscriptProvider({
-      transport: "direct",
       apiKey: "supadata-secret",
       directFetch,
     });
@@ -52,48 +51,6 @@ describe("Supadata transcript provider", () => {
     expect(new Headers(init?.headers).get("x-api-key")).toBe("supadata-secret");
   });
 
-  it("polls a 202 extension job until completion without using direct fetch", async () => {
-    const extensionFetch = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ jobId: "job_123" }, 202))
-      .mockResolvedValueOnce(jsonResponse({ status: "queued" }))
-      .mockResolvedValueOnce(jsonResponse({ status: "completed", ...completed }));
-    const extensionFetchFactory = vi.fn(() => extensionFetch as unknown as typeof fetch);
-    const directFetch = vi.fn();
-    const sleep = vi.fn(async () => undefined);
-    const provider = createSupadataTranscriptProvider({
-      transport: "extension",
-      apiKey: "extension-secret",
-      directFetch: directFetch as unknown as typeof fetch,
-      extensionFetchFactory,
-      sleep,
-      pollIntervalMs: 1,
-    });
-
-    const result = await provider.read({ url: "https://www.youtube.com/watch?v=abc", language: "en" });
-
-    expect(result.jobId).toBe("job_123");
-    expect(sleep).toHaveBeenCalledTimes(2);
-    expect(directFetch).not.toHaveBeenCalled();
-    expect(extensionFetchFactory).toHaveBeenCalledWith(expect.objectContaining({
-      operation: "supadata",
-      provider: "supadata",
-      apiKey: "extension-secret",
-    }));
-    const requestBodies = extensionFetch.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as unknown);
-    expect(requestBodies).toEqual([
-      {
-        url: "https://www.youtube.com/watch?v=abc",
-        lang: "en",
-        text: false,
-        mode: "auto",
-        chunkSize: 1_000,
-      },
-      { jobId: "job_123" },
-      { jobId: "job_123" },
-    ]);
-    expect(extensionFetch.mock.calls.every(([, init]) => !new Headers(init?.headers).has("x-api-key"))).toBe(true);
-  });
-
   it("aborts while waiting to poll", async () => {
     const controller = new AbortController();
     let signalSleepStarted!: () => void;
@@ -101,7 +58,6 @@ describe("Supadata transcript provider", () => {
       signalSleepStarted = resolve;
     });
     const provider = createSupadataTranscriptProvider({
-      transport: "direct",
       apiKey: "secret",
       directFetch: vi.fn(async () => jsonResponse({ jobId: "job_abort" }, 202)) as unknown as typeof fetch,
       sleep: (_milliseconds, signal) => new Promise((_resolve, reject) => {
@@ -119,7 +75,6 @@ describe("Supadata transcript provider", () => {
 
   it("returns a resumable pending job at the deadline and resumes without replaying the initial request", async () => {
     expect(() => createSupadataTranscriptProvider({
-      transport: "direct",
       apiKey: "secret",
       timeoutMs: MAX_TRANSCRIPT_WAIT_MS + 1,
     })).toThrow("between 1 and 90000");
@@ -128,7 +83,6 @@ describe("Supadata transcript provider", () => {
       .mockResolvedValueOnce(jsonResponse({ jobId: "job_timeout" }, 202))
       .mockResolvedValueOnce(jsonResponse({ status: "completed", ...completed }));
     const provider = createSupadataTranscriptProvider({
-      transport: "direct",
       apiKey: "secret",
       directFetch: directFetch as unknown as typeof fetch,
       timeoutMs: 10,
@@ -164,7 +118,6 @@ describe("Supadata transcript provider", () => {
         error: { error: `auth-${secret}`, message: `upstream echoed ${secret}` },
       }));
     const provider = createSupadataTranscriptProvider({
-      transport: "direct",
       apiKey: secret,
       directFetch: directFetch as unknown as typeof fetch,
       sleep: async () => undefined,
@@ -186,7 +139,6 @@ describe("Supadata transcript provider", () => {
   it("rejects private video targets before spending provider credits", async () => {
     const directFetch = vi.fn();
     const provider = createSupadataTranscriptProvider({
-      transport: "direct",
       apiKey: "secret",
       directFetch: directFetch as unknown as typeof fetch,
     });

@@ -25,6 +25,7 @@ import type { CharacterProfile } from "@/model/character-profile";
 import { createModelSnapshot } from "@/model/conversation";
 import { CharacterProfileEditor } from "./CharacterProfileEditor";
 import { ConversationLibrary } from "./ConversationLibrary";
+import { DeveloperTools, type ManualToolDefinition } from "./DeveloperTools";
 
 interface Props {
   open: boolean;
@@ -36,6 +37,9 @@ interface Props {
   onTestRealtime(): Promise<void>;
   onTestStt(): void;
   onTestTts(): void;
+  developerTools: ManualToolDefinition[];
+  developerToolsDisabled?: boolean;
+  onInvokeTool(name: string, input: unknown): Promise<unknown>;
 }
 
 /**
@@ -226,6 +230,9 @@ export function SettingsPanel({
   onTestRealtime,
   onTestStt,
   onTestTts,
+  developerTools,
+  developerToolsDisabled,
+  onInvokeTool,
 }: Props) {
   const {
     settings,
@@ -704,8 +711,11 @@ export function SettingsPanel({
           <button onClick={() => setCharactersOpen(true)}>Manage characters</button>
         </section>
 
-        <section className="settings-section voice-route-section">
-          <h3>Voice experience</h3>
+        <details className="settings-section route-settings-details voice-route-section">
+          <summary>
+            <strong>Voice experience</strong>
+            <small>{settings.voiceRoute === "realtime" ? "Realtime voice" : "Classic pipeline"}</small>
+          </summary>
           <p className="settings-section-copy">Choose one route for voice conversations. The inactive route keeps its configuration for later.</p>
           <div className="voice-route-grid" role="radiogroup" aria-label="Voice experience">
             <VoiceRouteCard
@@ -723,37 +733,6 @@ export function SettingsPanel({
               onChange={selectVoiceRoute}
             />
           </div>
-        </section>
-
-        <section className="settings-section voice-behavior-section">
-          <h3>Conversation behavior</h3>
-          <p className="settings-section-copy">These controls apply to both voice pipelines.</p>
-          <label className="toggle-row toggle-detail">
-            <input
-              type="checkbox"
-              checked={settings.voiceInteraction.handsFree}
-              onChange={(event) => updateVoiceInteraction({ handsFree: event.target.checked })}
-            />
-            <span><strong>Hands-free conversation</strong><small>Keep listening across spoken turns until you stop the microphone.</small></span>
-          </label>
-          <label className="toggle-row toggle-detail">
-            <input
-              type="checkbox"
-              checked={settings.voiceInteraction.allowVoiceInterruption}
-              onChange={(event) => updateVoiceInteraction({ allowVoiceInterruption: event.target.checked })}
-            />
-            <span><strong>Allow spoken interruptions</strong><small>Let your voice interrupt an assistant reply. The Stop button always remains available.</small></span>
-          </label>
-          <label className="toggle-row toggle-detail">
-            <input type="checkbox" checked={settings.subtitlesEnabled} onChange={(event) => setSubtitlesEnabled(event.target.checked)} />
-            <span><strong>Show subtitles</strong><small>Transcripts still stay in chat history when subtitles are hidden.</small></span>
-          </label>
-          <div className="shared-capabilities" aria-label="Available in both pipelines">
-            <span>✓ Live2D tools</span>
-            <span>✓ Chat history</span>
-            <span>✓ Character profiles</span>
-          </div>
-        </section>
 
         {settings.voiceRoute === "classic" ? (
           <div className="settings-route-stack" aria-label="Classic voice pipeline settings">
@@ -1059,30 +1038,51 @@ export function SettingsPanel({
             {realtimeConnectionStatus ? <span className="status-copy" role="status">{realtimeConnectionStatus}</span> : null}
           </section>
         )}
+        </details>
 
-        <section className="settings-section route-settings-details" aria-label="Content providers">
-          <h3>Content and tools</h3>
+        <details className="settings-section route-settings-details voice-behavior-section">
+          <summary><strong>Conversation behavior</strong><small>Shared voice controls</small></summary>
+          <p className="settings-section-copy">These controls apply to both voice pipelines.</p>
+          <label className="toggle-row toggle-detail">
+            <input
+              type="checkbox"
+              checked={settings.voiceInteraction.handsFree}
+              onChange={(event) => updateVoiceInteraction({ handsFree: event.target.checked })}
+            />
+            <span><strong>Hands-free conversation</strong><small>Keep listening across spoken turns until you stop the microphone.</small></span>
+          </label>
+          <label className="toggle-row toggle-detail">
+            <input
+              type="checkbox"
+              checked={settings.voiceInteraction.allowVoiceInterruption}
+              onChange={(event) => updateVoiceInteraction({ allowVoiceInterruption: event.target.checked })}
+            />
+            <span><strong>Allow spoken interruptions</strong><small>Let your voice interrupt an assistant reply. The Stop button always remains available.</small></span>
+          </label>
+          <label className="toggle-row toggle-detail">
+            <input type="checkbox" checked={settings.subtitlesEnabled} onChange={(event) => setSubtitlesEnabled(event.target.checked)} />
+            <span><strong>Show subtitles</strong><small>Transcripts still stay in chat history when subtitles are hidden.</small></span>
+          </label>
+          <div className="shared-capabilities" aria-label="Available in both pipelines">
+            <span>✓ Live2D tools</span>
+            <span>✓ Chat history</span>
+            <span>✓ Character profiles</span>
+          </div>
+        </details>
+
+        <details className="settings-section route-settings-details" aria-label="Content providers">
+          <summary>
+            <strong>Content and tools</strong>
+            <small>{settings.content.webProvider === "exa" ? "Exa" : "Extension reader"} · Supadata</small>
+          </summary>
           <p className="settings-section-copy">Only the provider selected here is called. Content returned by files, pages, and transcripts is treated as untrusted data.</p>
           <Field label="Web page provider">
             <select
               value={settings.content.webProvider}
-              onChange={(event) => {
-                const webProvider = event.target.value as typeof settings.content.webProvider;
-                updateContent({ webProvider, ...(webProvider === "extension-reader" ? { webTransport: "extension" } : {}) });
-              }}
+              onChange={(event) => updateContent({ webProvider: event.target.value as typeof settings.content.webProvider })}
             >
               <option value="exa">Exa Contents API</option>
               <option value="extension-reader">Extension reader (public pages)</option>
-            </select>
-          </Field>
-          <Field label="Web transport">
-            <select
-              value={settings.content.webTransport}
-              onChange={(event) => updateContent({ webTransport: event.target.value as typeof settings.content.webTransport })}
-              disabled={settings.content.webProvider === "extension-reader"}
-            >
-              <option value="direct">Direct from browser</option>
-              <option value="extension">Companion extension</option>
             </select>
           </Field>
           {settings.content.webProvider === "exa" ? (
@@ -1098,15 +1098,6 @@ export function SettingsPanel({
           <Field label="Video transcript provider">
             <select value={settings.content.videoTranscriptProvider} disabled>
               <option value="supadata">Supadata</option>
-            </select>
-          </Field>
-          <Field label="Transcript transport">
-            <select
-              value={settings.content.videoTransport}
-              onChange={(event) => updateContent({ videoTransport: event.target.value as typeof settings.content.videoTransport })}
-            >
-              <option value="direct">Direct from browser</option>
-              <option value="extension">Companion extension</option>
             </select>
           </Field>
           <SecretField
@@ -1125,8 +1116,9 @@ export function SettingsPanel({
               <option value="disabled">This model does not support images</option>
             </select>
           </Field>
-        </section>
+        </details>
 
+        <DeveloperTools tools={developerTools} disabled={developerToolsDisabled} onInvoke={onInvokeTool} />
         <section className="settings-section settings-reset">
           <button className="danger-button" onClick={resetSettings}>Restore defaults</button>
         </section>

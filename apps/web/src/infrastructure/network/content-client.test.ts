@@ -6,15 +6,13 @@ import { createContentNetworkClient } from "./content-client";
 
 const settings: ContentProviderSettings = {
   webProvider: "extension-reader",
-  webTransport: "direct",
   videoTranscriptProvider: "supadata",
-  videoTransport: "direct",
   exa: { apiKey: "exa-key", rememberApiKey: false },
   supadata: { apiKey: "supadata-key", rememberApiKey: false },
 };
 
 describe("content network client", () => {
-  it("does not fall back when the selected provider and transport are incompatible", async () => {
+  it("uses the extension only for the explicitly selected extension reader", async () => {
     const directFetch = vi.fn();
     const extensionFetchFactory = vi.fn();
     const client = createContentNetworkClient(settings, {
@@ -22,11 +20,8 @@ describe("content network client", () => {
       extensionFetchFactory,
     });
 
-    await expect(client.readWebPage("https://example.com/")).rejects.toMatchObject({
-      code: "transport-mismatch",
-      provider: "extension-reader",
-    });
+    await expect(client.readWebPage("https://example.com/")).rejects.toThrow();
     expect(directFetch).not.toHaveBeenCalled();
-    expect(extensionFetchFactory).not.toHaveBeenCalled();
+    expect(extensionFetchFactory).toHaveBeenCalledTimes(1);
   });
 });

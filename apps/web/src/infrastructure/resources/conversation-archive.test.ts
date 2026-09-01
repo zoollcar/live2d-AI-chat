@@ -147,9 +147,9 @@ async function resourceBundle(conversationId = "conversation-1", id = "resource-
   };
 }
 
-function artifact(conversationId = "conversation-1", resourceId = "resource-1", id = "artifact-1"): ArtifactRecord {
+function artifact(conversationId = "conversation-1", resourceId = "resource-1"): ArtifactRecord {
   return {
-    id,
+    id: resourceId,
     conversationId,
     kind: "resource-view",
     title: "Notes",
@@ -183,7 +183,7 @@ function conversation(id = "conversation-1", withReferences = true): Conversatio
         size: 13,
         status: "ready",
       }],
-      artifacts: [{ id: "artifact-1", resourceId: "resource-1", kind: "resource-view" }],
+      artifacts: [{ id: "resource-1", resourceId: "resource-1", kind: "resource-view" }],
     }] : [],
   };
 }
@@ -208,7 +208,7 @@ describe("conversation resource archive integration", () => {
 
   it("remaps colliding conversation, resource, artifact, message, and chunk ids before persisting", async () => {
     const existingBundle = await resourceBundle("conversation-1", "resource-1");
-    const existingArtifact = artifact("conversation-1", "resource-1", "artifact-1");
+    const existingArtifact = artifact("conversation-1", "resource-1");
     const repository = new MemoryResourceRepository([existingBundle], [existingArtifact]);
     let payload: ConversationExport | undefined;
 
@@ -228,7 +228,7 @@ describe("conversation resource archive integration", () => {
     const importedResourceId = importedConversation?.messages[0].attachments?.[0].id;
     const importedArtifactRef = importedConversation?.messages[0].artifacts?.[0];
     expect(importedResourceId).not.toBe("resource-1");
-    expect(importedArtifactRef?.id).not.toBe("artifact-1");
+    expect(importedArtifactRef?.id).toBe(importedResourceId);
     expect(importedArtifactRef?.resourceId).toBe(importedResourceId);
     expect(repository.resources.get("resource-1")).toEqual(existingBundle.resource);
     expect(repository.resources.get(importedResourceId ?? "")?.conversationId).toBe(importedConversation?.id);

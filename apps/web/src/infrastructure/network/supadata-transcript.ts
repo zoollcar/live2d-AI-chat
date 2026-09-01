@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { createExtensionFetch } from "@/infrastructure/extension/bridge-client";
 import { directCorsAwareFetch } from "./direct-fetch";
 import { fetchProviderResponse, readBoundedJson } from "./http";
 import {
@@ -10,7 +9,7 @@ import {
 } from "./provider-error";
 import { parsePublicHttpUrl } from "./public-url";
 import type {
-  ProviderTransportOptions,
+  DirectProviderOptions,
   VideoTranscriptContent,
   VideoTranscriptPending,
   VideoTranscriptResult,
@@ -49,7 +48,7 @@ const transcriptJobResultSchema = z.object({
 
 export type SupadataTranscriptMode = "native" | "auto" | "generate";
 
-export interface SupadataTranscriptProviderOptions extends ProviderTransportOptions {
+export interface SupadataTranscriptProviderOptions extends DirectProviderOptions {
   mode?: SupadataTranscriptMode;
   chunkSize?: number;
   timeoutMs?: number;
@@ -219,34 +218,9 @@ export function createSupadataTranscriptProvider(
   const { chunkSize, timeoutMs, pollIntervalMs } = validateOptions(options);
   const mode = options.mode ?? "auto";
   const sleep = options.sleep ?? defaultSleep;
-  let extensionFetcher: typeof fetch | undefined;
-  try {
-    extensionFetcher = options.transport === "extension"
-      ? (options.extensionFetchFactory ?? createExtensionFetch)({
-          operation: "supadata",
-          provider: "supadata",
-          apiKey,
-          mediaType: "application/json",
-        })
-      : undefined;
-  } catch (error) {
-    throw asSafeProviderFailure("supadata", error);
-  }
   const directFetcher = options.directFetch ?? directCorsAwareFetch;
 
   const request = async (payload: { url: string; lang?: string; text: false; mode: SupadataTranscriptMode; chunkSize: number } | { jobId: string }, signal: AbortSignal) => {
-    if (options.transport === "extension") {
-      const response = await fetchProviderResponse("supadata", extensionFetcher!, SUPADATA_TRANSCRIPT_URL, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-        cache: "no-store",
-        credentials: "omit",
-        referrerPolicy: "no-referrer",
-      }, signal);
-      return readBoundedJson("supadata", response, signal);
-    }
-
     const target = new URL(SUPADATA_TRANSCRIPT_URL);
     if ("jobId" in payload) {
       target.pathname = `${target.pathname.replace(/\/+$/, "")}/${encodeURIComponent(payload.jobId)}`;

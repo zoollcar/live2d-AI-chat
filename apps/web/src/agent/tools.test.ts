@@ -32,6 +32,18 @@ describe("scene tools", () => {
       .map((entry) => entry.function.name)).not.toContain("inspectImage");
   });
 
+  it("only registers tools enabled by the active character profile", async () => {
+    const registry = createAgentToolRegistry({
+      scene: fakeScene(),
+      emit: vi.fn(),
+      enabledTools: ["setState", "performAction"],
+    });
+
+    expect(Object.keys(registry.aiTools)).toEqual(["setState", "performAction"]);
+    await expect(registry.execute("disabled", "setDecorations", { decorations: [] }))
+      .rejects.toThrow("Unknown agent tool");
+  });
+
   it("runs independent reads in parallel while serializing scene mutations by callId", async () => {
     let releaseScene!: () => void;
     let releaseFirstRead!: () => void;
@@ -49,8 +61,8 @@ describe("scene tools", () => {
     });
 
     const sceneCall = registry.execute("scene-1", "setState", { state: "thinking" });
-    const firstRead = registry.execute("read-1", "readResource", { resourceId: "one", maxChars: 100 });
-    const secondRead = registry.execute("read-2", "readResource", { resourceId: "two", maxChars: 100 });
+    const firstRead = registry.execute("read-1", "readResource", { contentId: "one", maxChars: 100 });
+    const secondRead = registry.execute("read-2", "readResource", { contentId: "two", maxChars: 100 });
     await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(2));
 
     releaseFirstRead();
@@ -76,7 +88,7 @@ describe("scene tools", () => {
       },
       emit: (event) => events.push(event),
     });
-    const call = registry.execute("read-cancel", "readResource", { resourceId: "one", maxChars: 100 }, controller.signal);
+    const call = registry.execute("read-cancel", "readResource", { contentId: "one", maxChars: 100 }, controller.signal);
     await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({
       type: "tool-call",
       callId: "read-cancel",

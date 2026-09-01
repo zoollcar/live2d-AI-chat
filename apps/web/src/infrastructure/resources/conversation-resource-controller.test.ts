@@ -25,9 +25,7 @@ import {
 
 const contentSettings: ContentProviderSettings = {
   webProvider: "exa",
-  webTransport: "direct",
   videoTranscriptProvider: "supadata",
-  videoTransport: "direct",
   exa: { apiKey: "test", rememberApiKey: false },
   supadata: { apiKey: "test", rememberApiKey: false },
 };
@@ -176,7 +174,7 @@ describe("conversation resource controller", () => {
     }]);
 
     expect(prompt).toContain('<attached_resources trust="untrusted-data-only">');
-    expect(prompt).toContain("resourceId=resource-1");
+    expect(prompt).toContain("contentId=resource-1");
     expect(prompt).not.toContain("<svg");
   });
 
@@ -202,7 +200,7 @@ describe("conversation resource controller", () => {
       updatedAt: 2,
     };
     const artifact: ArtifactRecord = {
-      id: "artifact-pdf",
+      id: resource.id,
       conversationId: "conversation-1",
       kind: "resource-view",
       title: "Report",
@@ -237,15 +235,18 @@ describe("conversation resource controller", () => {
       updatedAt: 3,
       content: { text: "newer" },
     });
-    const currentRevision = useStageWorkspaceStore.getState().layoutRevision;
-
     expect(instance.closeArtifact(artifact.id, staleRevision)).toBe(false);
     expect(useStageWorkspaceStore.getState().artifacts.some((item) => item.id === artifact.id)).toBe(true);
     expect(getStageDocumentPreviewSource(artifact.id)).toBeDefined();
 
-    expect(instance.closeArtifact(artifact.id, currentRevision)).toBe(true);
+    await expect(instance.workspace.closeContent(resource.id)).resolves.toEqual({
+      ok: true,
+      closed: true,
+      contentId: resource.id,
+    });
     expect(useStageWorkspaceStore.getState().artifacts.some((item) => item.id === artifact.id)).toBe(false);
     expect(getStageDocumentPreviewSource(artifact.id)).toBeUndefined();
+    expect(await repository.getArtifact(artifact.id)).toBeUndefined();
   });
 
   it("rejects resources owned by another conversation", async () => {
@@ -334,7 +335,7 @@ describe("conversation resource controller", () => {
       extension: "png",
     });
     const artifact: ArtifactRecord = {
-      id: "artifact-svg-preview",
+      id: source.id,
       conversationId: "conversation-1",
       kind: "resource-view",
       title: "Drawing",

@@ -21,6 +21,7 @@ export class ChromeAgentRuntime implements AgentRuntime {
         workspace: options.workspace,
         network: options.network,
         capabilities: options.toolCapabilities,
+        enabledTools: options.enabledTools,
       });
       const { initialPrompts, prompt } = splitPrompt(options.messages);
       session = await LanguageModel.create({

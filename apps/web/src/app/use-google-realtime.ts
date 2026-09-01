@@ -602,6 +602,7 @@ export function useGoogleRealtime(options: UseGoogleRealtimeOptions): GoogleReal
       workspace: current.workspace,
       network: current.network,
       capabilities: current.toolCapabilities,
+      enabledTools: current.profile.enabledTools,
     });
     const conversationId = conversation.id;
     const session = new GoogleLiveSession({

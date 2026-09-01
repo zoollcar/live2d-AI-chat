@@ -9,11 +9,7 @@ import type {
   AgentWorkspaceAccess,
   ResourceLocator as AgentResourceLocator,
 } from "@/agent/tool-context";
-import {
-  createArtifactId,
-  toArtifactRef,
-  type ArtifactRecord,
-} from "@/model/artifact";
+import { toArtifactRef, type ArtifactRecord } from "@/model/artifact";
 import {
   createPendingResource,
   createResourceId,
@@ -239,7 +235,7 @@ function transcriptBundle(resource: ResourceRecord, content: VideoTranscriptCont
 function createArtifact(resource: ResourceRecord, kind: ArtifactRecord["kind"], previewResourceId?: string): ArtifactRecord {
   const now = Date.now();
   return {
-    id: createArtifactId(),
+    id: resource.id,
     conversationId: resource.conversationId,
     kind,
     title: resource.name,
@@ -264,7 +260,7 @@ function boundedToolResult(value: unknown): unknown {
 export function buildAttachmentPrompt(text: string, attachments: readonly ResourceRef[]): string {
   if (attachments.length === 0) return text;
   const resources = attachments.map((attachment) =>
-    `- ${attachment.name} (resourceId=${attachment.id}, kind=${attachment.kind}, status=${attachment.status})`).join("\n");
+    `- ${attachment.name} (contentId=${attachment.id}, kind=${attachment.kind}, status=${attachment.status})`).join("\n");
   const userText = text.trim() || "Please inspect the attached resources and respond appropriately.";
   return `${userText}\n\n<attached_resources trust="untrusted-data-only">\n${resources}\n</attached_resources>`;
 }
@@ -618,7 +614,7 @@ export function createConversationResourceController(
   const showResource = async (resourceId: string, locator?: AgentResourceLocator): Promise<ArtifactRef> => {
     const resource = assertOwnedResource(await repository.getResource(resourceId), options.conversationId);
     const existing = (await repository.listArtifacts(options.conversationId)).find((artifact) =>
-      artifact.kind === "resource-view" && artifact.resourceId === resourceId);
+      artifact.resourceId === resourceId);
     let artifact = existing;
     if (!artifact) {
       let previewResourceId: string | undefined;
@@ -662,13 +658,17 @@ export function createConversationResourceController(
 
   const workspace: AgentWorkspaceAccess = {
     showResource,
-    async closeContent(artifactId, signal) {
+    async closeContent(contentId, signal) {
       signal?.throwIfAborted();
       const store = useStageWorkspaceStore.getState();
-      const id = artifactId ?? store.activeArtifactId;
-      if (!id) return { ok: true, closed: false };
-      if (!closeLoadedArtifact(id)) return { ok: true, closed: false };
-      return { ok: true, closed: true, artifactId: id };
+      const requestedId = contentId?.trim();
+      const id = requestedId ?? store.activeArtifactId;
+      if (!id) return { ok: true, closed: false, reason: "No matching stage content is open." };
+      if (!closeLoadedArtifact(id)) {
+        return { ok: true, closed: false, requestedId, reason: "No matching stage content is open." };
+      }
+      await repository.deleteArtifact(id);
+      return { ok: true, closed: true, contentId: requestedId ?? id };
     },
     async drawSvg(input, signal) {
       signal?.throwIfAborted();
@@ -855,7 +855,15 @@ export function createConversationResourceController(
     },
     showResource,
     closeArtifact(artifactId, expectedLayoutRevision) {
-      return closeLoadedArtifact(artifactId, expectedLayoutRevision);
+      const closed = closeLoadedArtifact(artifactId, expectedLayoutRevision);
+      if (closed) {
+        void repository.deleteArtifact(artifactId).catch((error) => {
+          options.onNotification?.(
+            error instanceof Error ? error.message : "Closed stage content could not be removed from storage.",
+          );
+        });
+      }
+      return closed;
     },
     async cancelResource(resourceId) {
       assertOwnedResource(await repository.getResource(resourceId), options.conversationId);

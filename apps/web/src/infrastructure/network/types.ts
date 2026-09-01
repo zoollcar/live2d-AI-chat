@@ -1,13 +1,10 @@
-import type { RemoteTransport } from "@live2d-chat/shared";
 import type { ExtensionFetchOptions } from "@/infrastructure/extension/bridge-client";
 
 export type ExtensionFetchFactory = (options: ExtensionFetchOptions) => typeof fetch;
 
-export interface ProviderTransportOptions {
-  transport: RemoteTransport;
+export interface DirectProviderOptions {
   apiKey: string;
   directFetch?: typeof fetch;
-  extensionFetchFactory?: ExtensionFetchFactory;
 }
 
 export interface WebPageContent {

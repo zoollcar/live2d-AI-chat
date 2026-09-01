@@ -1,10 +1,9 @@
 import { z } from "zod";
-import { createExtensionFetch } from "@/infrastructure/extension/bridge-client";
 import { directCorsAwareFetch } from "./direct-fetch";
 import { fetchProviderResponse, readBoundedJson } from "./http";
-import { ContentProviderError, asSafeProviderFailure, mapProviderHttpError } from "./provider-error";
+import { ContentProviderError, mapProviderHttpError } from "./provider-error";
 import { parsePublicHttpUrl } from "./public-url";
-import type { ProviderTransportOptions, WebPageContent } from "./types";
+import type { DirectProviderOptions, WebPageContent } from "./types";
 
 const EXA_CONTENTS_URL = "https://api.exa.ai/contents";
 const DEFAULT_MAX_CHARACTERS = 200_000;
@@ -31,7 +30,7 @@ const exaContentsResponseSchema = z.object({
   statuses: z.array(exaStatusSchema).max(10).optional(),
 }).loose();
 
-export interface ExaContentsProviderOptions extends ProviderTransportOptions {
+export interface ExaContentsProviderOptions extends DirectProviderOptions {
   maxCharacters?: number;
 }
 
@@ -74,42 +73,26 @@ export function createExaContentsProvider(options: ExaContentsProviderOptions): 
     throw new ContentProviderError("exa", "missing-credential", "Enter an Exa API key before reading web pages.");
   }
   const maxCharacters = validatedMaxCharacters(options.maxCharacters);
-  let fetcher: typeof fetch;
-  try {
-    fetcher = options.transport === "extension"
-      ? (options.extensionFetchFactory ?? createExtensionFetch)({
-          operation: "exa",
-          provider: "exa",
-          apiKey,
-          mediaType: "application/json",
-        })
-      : (options.directFetch ?? directCorsAwareFetch);
-  } catch (error) {
-    throw asSafeProviderFailure("exa", error);
-  }
+  const fetcher = options.directFetch ?? directCorsAwareFetch;
 
   return {
     id: "exa",
     async read(value, signal) {
       const source = parsePublicHttpUrl(value, "exa");
-      const requestBody = options.transport === "extension"
-        ? { urls: [source.toString()], text: true as const }
-        : {
-            urls: [source.toString()],
-            text: {
-              maxCharacters,
-              includeHtmlTags: false,
-              verbosity: "standard",
-              excludeSections: ["navigation", "banner", "sidebar", "footer"],
-            },
-            maxAgeHours: 24,
-            livecrawlTimeout: 12_000,
-          };
+      const requestBody = {
+        urls: [source.toString()],
+        text: {
+          maxCharacters,
+          includeHtmlTags: false,
+          verbosity: "standard",
+          excludeSections: ["navigation", "banner", "sidebar", "footer"],
+        },
+        maxAgeHours: 24,
+        livecrawlTimeout: 12_000,
+      };
       const response = await fetchProviderResponse("exa", fetcher, EXA_CONTENTS_URL, {
         method: "POST",
-        headers: options.transport === "direct"
-          ? { "content-type": "application/json", "x-api-key": apiKey }
-          : { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "x-api-key": apiKey },
         body: JSON.stringify(requestBody),
         cache: "no-store",
         credentials: "omit",

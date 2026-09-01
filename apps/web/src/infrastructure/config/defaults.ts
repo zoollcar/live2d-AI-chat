@@ -47,9 +47,7 @@ export const defaultSettings: AppSettings = {
   },
   content: {
     webProvider: "exa",
-    webTransport: "direct",
     videoTranscriptProvider: "supadata",
-    videoTransport: "direct",
     exa: {
       apiKey: "",
       rememberApiKey: false,

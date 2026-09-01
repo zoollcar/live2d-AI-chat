@@ -95,9 +95,7 @@ export interface ProviderSecretSettings {
 
 export interface ContentProviderSettings {
   webProvider: WebContentProvider;
-  webTransport: RemoteTransport;
   videoTranscriptProvider: VideoTranscriptProvider;
-  videoTransport: RemoteTransport;
   exa: ProviderSecretSettings;
   supadata: ProviderSecretSettings;
 }

@@ -8,7 +8,7 @@ import {
   type Conversation,
   type ConversationExport,
 } from "@/model/conversation";
-import { createArtifactId, toArtifactRef, type ArtifactRecord } from "@/model/artifact";
+import { toArtifactRef, type ArtifactRecord } from "@/model/artifact";
 import {
   createResourceChunkId,
   createResourceId,
@@ -218,7 +218,6 @@ async function allocateId(
 function remapMessage(
   message: ChatMessage,
   resourceIds: ReadonlyMap<string, string>,
-  artifactIds: ReadonlyMap<string, string>,
 ): ChatMessage {
   return {
     ...message,
@@ -228,10 +227,9 @@ function remapMessage(
       return { ...reference, id };
     }),
     artifacts: message.artifacts?.map((reference) => {
-      const id = artifactIds.get(reference.id);
       const resourceId = resourceIds.get(reference.resourceId);
-      if (!id || !resourceId) throw archiveError(`Message references unarchived artifact '${reference.id}'.`);
-      return { ...reference, id, resourceId };
+      if (!resourceId) throw archiveError(`Message references unarchived artifact '${reference.id}'.`);
+      return { ...reference, id: resourceId, resourceId };
     }),
   };
 }
@@ -264,16 +262,6 @@ async function prepareArchiveImport(
     resourceIds.set(currentId, id);
   }
 
-  const reservedArtifactIds = new Set(imported.artifacts.map((artifact) => artifact.id));
-  const artifactIds = new Map<string, string>();
-  for (const artifact of imported.artifacts) {
-    const id = await repository.getArtifact(artifact.id)
-      ? await allocateId(createArtifactId, reservedArtifactIds, async (candidate) =>
-        Boolean(await repository.getArtifact(candidate)))
-      : artifact.id;
-    artifactIds.set(artifact.id, id);
-  }
-
   const resources = imported.resources.map((bundle) => {
     const id = resourceIds.get(bundle.resource.id);
     const conversationId = conversationIds.get(bundle.resource.conversationId);
@@ -290,16 +278,15 @@ async function prepareArchiveImport(
   });
 
   const artifacts = imported.artifacts.map((artifact) => {
-    const id = artifactIds.get(artifact.id);
     const conversationId = conversationIds.get(artifact.conversationId);
     const resourceId = resourceIds.get(artifact.resourceId);
     const previewResourceId = artifact.previewResourceId
       ? resourceIds.get(artifact.previewResourceId)
       : undefined;
-    if (!id || !conversationId || !resourceId || (artifact.previewResourceId && !previewResourceId)) {
+    if (!conversationId || !resourceId || (artifact.previewResourceId && !previewResourceId)) {
       throw archiveError(`Artifact '${artifact.id}' has an invalid archive reference.`);
     }
-    return { ...artifact, id, conversationId, resourceId, previewResourceId };
+    return { ...artifact, id: resourceId, conversationId, resourceId, previewResourceId };
   });
 
   const conversations = imported.conversations.conversations.map((conversation) => {
@@ -308,7 +295,7 @@ async function prepareArchiveImport(
     return conversationSchema.parse({
       ...conversation,
       id,
-      messages: conversation.messages.map((message) => remapMessage(message, resourceIds, artifactIds)),
+      messages: conversation.messages.map((message) => remapMessage(message, resourceIds)),
     });
   });
 

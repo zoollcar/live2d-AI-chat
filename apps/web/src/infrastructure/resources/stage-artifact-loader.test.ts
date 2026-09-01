@@ -35,16 +35,15 @@ function resource(
 }
 
 function artifact(
-  id: string,
-  resourceId: string,
+  contentId: string,
   overrides: Partial<ArtifactRecord> = {},
 ): ArtifactRecord {
   return {
-    id,
+    id: contentId,
     conversationId: "conversation",
     kind: "resource-view",
-    title: `Artifact ${id}`,
-    resourceId,
+    title: `Artifact ${contentId}`,
+    resourceId: contentId,
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
@@ -86,7 +85,7 @@ function objectUrlFixture() {
 
 describe("stage artifact loader", () => {
   it("groups extracted presentation chunks into slides and honors a selected locator", async () => {
-    const record = artifact("deck-view", "deck", { locator: { slide: 2 } });
+    const record = artifact("deck", { locator: { slide: 2 } });
     const deck = resource("deck", "pptx", {
       mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       extension: "pptx",
@@ -99,7 +98,7 @@ describe("stage artifact loader", () => {
       { id: "deck:1", resourceId: "deck", index: 1, text: "Second ", locator: { slide: 2, startChar: 6, endChar: 13 } },
       { id: "deck:2", resourceId: "deck", index: 2, text: "slide", locator: { slide: 2, startChar: 13, endChar: 18 } },
     ];
-    const loaded = await loadStageArtifact("deck-view", {
+    const loaded = await loadStageArtifact("deck", {
       repository: repositoryFixture({ artifacts: [record], resources: [deck], chunks }),
     });
 
@@ -120,7 +119,7 @@ describe("stage artifact loader", () => {
       textLength: 11,
       metadata: { pageCount: 2 },
     });
-    const record = artifact("report-view", pdf.id);
+    const record = artifact(pdf.id);
     const urls = objectUrlFixture();
     const repository = repositoryFixture({
       artifacts: [],
@@ -169,14 +168,14 @@ describe("stage artifact loader", () => {
       errorMessage: "The page could not be fetched.",
     });
     const repository = repositoryFixture({
-      artifacts: [artifact("pending-view", "pending"), artifact("failed-view", "failed")],
+      artifacts: [artifact("pending"), artifact("failed")],
       resources: [pending, failed],
     });
 
-    await expect(loadStageArtifact("pending-view", { repository })).resolves.toMatchObject({
+    await expect(loadStageArtifact("pending", { repository })).resolves.toMatchObject({
       artifact: { kind: "text", status: "queued" },
     });
-    await expect(loadStageArtifact("failed-view", { repository })).resolves.toMatchObject({
+    await expect(loadStageArtifact("failed", { repository })).resolves.toMatchObject({
       artifact: { kind: "web", status: "error", errorMessage: "The page could not be fetched." },
     });
   });
@@ -195,7 +194,7 @@ describe("stage artifact loader", () => {
     const previewBlob = new Blob(["webp"], { type: "image/webp" });
     const urls = objectUrlFixture();
     const repository = repositoryFixture({
-      artifacts: [artifact("drawing", "drawing-source", {
+      artifacts: [artifact("drawing-source", {
         kind: "svg-drawing",
         previewResourceId: "drawing-preview",
       })],
@@ -206,7 +205,7 @@ describe("stage artifact loader", () => {
       ],
     });
 
-    const loaded = await loadStageArtifact("drawing", { repository, objectUrls: urls });
+    const loaded = await loadStageArtifact("drawing-source", { repository, objectUrls: urls });
     expect(loaded.artifact).toMatchObject({
       kind: "svg",
       status: "ready",
@@ -223,7 +222,7 @@ describe("stage artifact loader", () => {
   it("returns an error view when an SVG has no static raster preview", async () => {
     const svg = resource("drawing-source", "svg", { mimeType: "image/svg+xml", extension: "svg" });
     const urls = objectUrlFixture();
-    const loaded = await loadStageArtifact(artifact("drawing", "drawing-source", { kind: "svg-drawing" }), {
+    const loaded = await loadStageArtifact(artifact("drawing-source", { kind: "svg-drawing" }), {
       repository: repositoryFixture({ artifacts: [], resources: [svg] }),
       objectUrls: urls,
     });
@@ -244,7 +243,7 @@ describe("stage artifact loader", () => {
     });
     const rawSvg = new Blob(["<svg></svg>"], { type: "image/svg+xml" });
     const urls = objectUrlFixture();
-    const loaded = await loadStageArtifact(artifact("drawing", "drawing-source", {
+    const loaded = await loadStageArtifact(artifact("drawing-source", {
       kind: "svg-drawing",
       previewResourceId: "mislabeled-preview",
     }), {
@@ -277,8 +276,8 @@ describe("stage artifact loader", () => {
     const imageBlob = new Blob(["png"], { type: "image/png" });
     const repository = repositoryFixture({
       artifacts: [
-        artifact("sticker", "sticker-image", { kind: "sticker" }),
-        artifact("video", "transcript"),
+        artifact("sticker-image", { kind: "sticker" }),
+        artifact("transcript"),
       ],
       resources: [image, transcript],
       blobs: [{ resourceId: "sticker-image", blob: imageBlob, byteSize: imageBlob.size, mimeType: imageBlob.type }],
@@ -292,12 +291,12 @@ describe("stage artifact loader", () => {
     });
     const urls = objectUrlFixture();
 
-    const sticker = await loadStageArtifact("sticker", { repository, objectUrls: urls });
+    const sticker = await loadStageArtifact("sticker-image", { repository, objectUrls: urls });
     expect(sticker.artifact).toMatchObject({
       kind: "image",
       content: { imageUrl: "blob:preview-1", alt: "Happy reaction" },
     });
-    const video = await loadStageArtifact("video", { repository, objectUrls: urls });
+    const video = await loadStageArtifact("transcript", { repository, objectUrls: urls });
     expect(video.artifact).toMatchObject({
       kind: "video-transcript",
       source: { label: "video.example", url: "https://video.example/watch/123" },

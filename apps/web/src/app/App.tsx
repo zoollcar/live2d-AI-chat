@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createAgentRuntime, type AgentEvent, type ChatMessage } from "@/agent";
+import { createAgentToolRegistry } from "@/agent/tools";
 import {
   getChromePromptApiAvailability,
   isChromePromptApiSupported,
@@ -71,12 +72,12 @@ function conversationSeed(profile: CharacterProfile, settings: LlmSettings): New
   };
 }
 
-function latestVisibleMessage(messages: readonly ChatMessage[], fallback: string): string {
+function latestVisibleMessage(messages: readonly ChatMessage[]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.role !== "system" && message.content.trim()) return message.content;
   }
-  return fallback;
+  return "";
 }
 
 function artifactRefFromToolOutput(output: unknown): ArtifactRef | undefined {
@@ -429,7 +430,7 @@ export default function App() {
     if (!scene) return;
     let cancelled = false;
     stopEverything();
-    setSubtitle(latestVisibleMessage(activeConversation?.messages ?? [], activeProfile.firstMessage));
+    setSubtitle(latestVisibleMessage(activeConversation?.messages ?? []));
     setStatus({ kind: "busy", message: `Loading ${activeProfile.name}` });
     scene.setDecorations(activeProfile.live2d.defaultDecorations);
     scene.setStageLayout(activeProfile.live2d.defaultLayout);
@@ -622,6 +623,7 @@ export default function App() {
       workspace: resourceController?.workspace,
       network: resourceController?.network,
       toolCapabilities: { inspectImage: imageInspectionCapability.available },
+      enabledTools: activeProfile.enabledTools,
       signal: controller.signal,
       emit,
     });
@@ -631,6 +633,7 @@ export default function App() {
     flushActiveConversation,
     interruptPlayback,
     imageInspectionCapability.available,
+    activeProfile.enabledTools,
     resourceController,
     scene,
     setMessages,
@@ -1077,6 +1080,16 @@ export default function App() {
     if (profile) setActiveProfile(profile.id);
   }, [activeProfile, deleteConversation, setActiveProfile, settings.llm, stopEverything]);
 
+  const developerToolRegistry = useMemo(() => scene ? createAgentToolRegistry({
+    scene,
+    resources: resourceController?.resources,
+    workspace: resourceController?.workspace,
+    network: resourceController?.network,
+    capabilities: { inspectImage: imageInspectionCapability.available },
+    enabledTools: activeProfile.enabledTools,
+    emit: () => undefined,
+  }) : undefined, [activeProfile.enabledTools, imageInspectionCapability.available, resourceController, scene]);
+
   useEffect(() => {
     const flush = () => { void flushActiveConversation(); };
     window.addEventListener("pagehide", flush);
@@ -1173,6 +1186,11 @@ export default function App() {
             onDeleteConversation={onDeleteConversation}
             onSelectConversation={onSelectConversation}
             onTestRealtime={testRealtimeConnection}
+            developerTools={developerToolRegistry?.manualTools ?? []}
+            developerToolsDisabled={!developerToolRegistry}
+            onInvokeTool={(name, input) => developerToolRegistry
+              ? developerToolRegistry.execute(`developer-${crypto.randomUUID()}`, name, input)
+              : Promise.reject(new Error("The Live2D scene is not ready yet."))}
             onTestStt={() => void startListening()}
             onTestTts={() => speechQueueRef.current?.enqueue(
               effectiveTtsSettings.language.toLowerCase().startsWith("zh")

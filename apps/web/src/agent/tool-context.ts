@@ -1,5 +1,13 @@
 import type { ArtifactRef, ResourceRef } from "@live2d-chat/shared";
 
+export const agentToolNames = [
+  "setState", "setDecorations", "performAction", "setStageLayout",
+  "listResources", "readResource", "readWebPage", "readVideoTranscript",
+  "showResourceOnStage", "closeStageContent", "drawSvgOnStage", "sendSticker", "inspectImage",
+] as const;
+
+export type AgentToolName = (typeof agentToolNames)[number];
+
 export interface ResourceLocator {
   page?: number;
   slide?: number;
@@ -22,7 +30,7 @@ export interface AgentResourceAccess {
 
 export interface AgentWorkspaceAccess {
   showResource(resourceId: string, locator?: ResourceLocator, signal?: AbortSignal): Promise<ArtifactRef>;
-  closeContent(artifactId?: string, signal?: AbortSignal): Promise<unknown>;
+  closeContent(contentId?: string, signal?: AbortSignal): Promise<unknown>;
   drawSvg(input: { title: string; alt: string; svg: string }, signal?: AbortSignal): Promise<ArtifactRef>;
   sendSticker(stickerId: string, signal?: AbortSignal): Promise<ArtifactRef>;
 }

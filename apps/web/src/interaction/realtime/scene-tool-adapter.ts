@@ -3,6 +3,7 @@ import type {
   AgentNetworkAccess,
   AgentResourceAccess,
   AgentToolCapabilities,
+  AgentToolName,
   AgentWorkspaceAccess,
 } from "@/agent/tool-context";
 import type { AgentEvent } from "@/agent/types";
@@ -25,6 +26,7 @@ export function createGoogleLiveSceneToolAdapter(
     workspace?: AgentWorkspaceAccess;
     network?: AgentNetworkAccess;
     capabilities?: Partial<AgentToolCapabilities>;
+    enabledTools?: readonly AgentToolName[];
   } = {},
 ): GoogleLiveToolAdapter {
   const registry = createAgentToolRegistry({
@@ -34,6 +36,7 @@ export function createGoogleLiveSceneToolAdapter(
     workspace: options.workspace,
     network: options.network,
     capabilities: options.capabilities,
+    enabledTools: options.enabledTools,
   });
   const active = new Map<string, AbortController>();
 

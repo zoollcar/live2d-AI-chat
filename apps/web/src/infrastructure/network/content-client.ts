@@ -33,15 +33,13 @@ export function createContentNetworkClient(
       switch (settings.webProvider) {
         case "exa":
           return await createExaContentsProvider({
-            transport: settings.webTransport,
             apiKey: settings.exa.apiKey,
             directFetch: options.directFetch,
-            extensionFetchFactory: options.extensionFetchFactory,
             maxCharacters: options.exaMaxCharacters,
           }).read(url, signal);
         case "extension-reader":
           return await createExtensionReaderProvider({
-            transport: settings.webTransport,
+            transport: "extension",
             extensionFetchFactory: options.extensionFetchFactory,
             maxCharacters: options.extensionReaderMaxCharacters,
           }).read(url, signal);
@@ -51,10 +49,8 @@ export function createContentNetworkClient(
       switch (settings.videoTranscriptProvider) {
         case "supadata":
           return await createSupadataTranscriptProvider({
-            transport: settings.videoTransport,
             apiKey: settings.supadata.apiKey,
             directFetch: options.directFetch,
-            extensionFetchFactory: options.extensionFetchFactory,
             timeoutMs: options.transcriptTimeoutMs,
             pollIntervalMs: options.transcriptPollIntervalMs,
             sleep: options.transcriptSleep,
@@ -65,10 +61,8 @@ export function createContentNetworkClient(
       switch (settings.videoTranscriptProvider) {
         case "supadata":
           return await createSupadataTranscriptProvider({
-            transport: settings.videoTransport,
             apiKey: settings.supadata.apiKey,
             directFetch: options.directFetch,
-            extensionFetchFactory: options.extensionFetchFactory,
             timeoutMs: options.transcriptTimeoutMs,
             pollIntervalMs: options.transcriptPollIntervalMs,
             sleep: options.transcriptSleep,

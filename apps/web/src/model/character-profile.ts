@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { stageLayoutIds, type TtsProviderId } from "@live2d-chat/shared";
 import { decorationIds, live2dCatalog, stateIds, type DecorationId, type StateId } from "./live2d/catalog";
+import { agentToolNames, type AgentToolName } from "@/agent/tool-context";
 
 export interface CharacterProfile {
   id: string;
@@ -11,6 +12,7 @@ export interface CharacterProfile {
   firstMessage: string;
   exampleDialogue?: string;
   systemPrompt?: string;
+  enabledTools: AgentToolName[];
   live2d: {
     modelId: string;
     defaultState: StateId;
@@ -37,6 +39,8 @@ export const characterProfileSchema: z.ZodType<CharacterProfile> = z.object({
   firstMessage: trimmedText(2000),
   exampleDialogue: trimmedText(8000).optional(),
   systemPrompt: trimmedText(12000).optional(),
+  enabledTools: z.array(z.enum(agentToolNames)).max(agentToolNames.length)
+    .refine((names) => new Set(names).size === names.length, "Enabled tools must not contain duplicates."),
   live2d: z.object({
     // Phase one intentionally supports only the model bundled with the app.
     modelId: z.literal(live2dCatalog.id),
@@ -61,7 +65,8 @@ export const defaultCharacterProfile: CharacterProfile = {
   description: "A capable Live2D assistant who helps with everyday questions and tasks.",
   personality: "Helpful, engaging, entertaining, truthful, and concise.",
   scenario: "You are speaking with the user as their personal AI secretary.",
-  firstMessage: "Hello! How can I help you today?",
+  firstMessage: "",
+  enabledTools: [...agentToolNames],
   live2d: {
     modelId: live2dCatalog.id,
     defaultState: "neutral",

@@ -121,7 +121,7 @@ describe("IndexedDB v2 resource repository", () => {
     await expect(repository.readResource(bundle.resource.id)).resolves.toMatchObject({ text: "hello" });
 
     const artifact: ArtifactRecord = {
-      id: "artifact-1",
+      id: bundle.resource.id,
       conversationId: "conversation-1",
       kind: "resource-view",
       title: "Hello",

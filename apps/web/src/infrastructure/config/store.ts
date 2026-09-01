@@ -43,7 +43,7 @@ interface SettingsStore {
   updateStt(patch: Partial<SttSettings>): void;
   updateTts(patch: Partial<TtsSettings>): void;
   updateRealtime(patch: Partial<GoogleRealtimeSettings>): void;
-  updateContent(patch: Partial<Pick<ContentProviderSettings, "webProvider" | "webTransport" | "videoTranscriptProvider" | "videoTransport">>): void;
+  updateContent(patch: Partial<Pick<ContentProviderSettings, "webProvider" | "videoTranscriptProvider">>): void;
   updateContentSecret(provider: "exa" | "supadata", patch: Partial<ContentProviderSettings["exa"]>): void;
   updateCapabilities(patch: Partial<ModelCapabilitySettings>): void;
   setSubtitlesEnabled(enabled: boolean): void;

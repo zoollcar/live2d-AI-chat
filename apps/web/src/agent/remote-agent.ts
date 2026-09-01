@@ -21,6 +21,7 @@ export class RemoteAgentRuntime implements AgentRuntime {
         workspace: options.workspace,
         network: options.network,
         capabilities: options.toolCapabilities,
+        enabledTools: options.enabledTools,
       });
       // The AI SDK 7+ no longer allows system messages inside `messages` —
       // they have to travel through the agent's `instructions` option or the

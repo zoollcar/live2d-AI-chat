@@ -27,15 +27,12 @@ export const artifactRecordSchema = z.object({
 }).refine((artifact) => artifact.previewResourceId !== artifact.resourceId, {
   message: "An artifact preview must be a separate inert resource.",
   path: ["previewResourceId"],
+}).refine((artifact) => artifact.id === artifact.resourceId, {
+  message: "Artifact and resource must use the same content id.",
+  path: ["id"],
 });
 
 export type ArtifactRecord = z.infer<typeof artifactRecordSchema>;
-
-export function createArtifactId(): string {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `artifact-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-}
 
 export function toArtifactRef(artifact: ArtifactRecord): ArtifactRef {
   return {

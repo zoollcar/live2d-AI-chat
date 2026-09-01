@@ -4,6 +4,7 @@ import {
   resourceLocatorSchema,
   resourceRecordSchema,
   createPendingResource,
+  createResourceId,
   toResourceRef,
 } from "./resource";
 
@@ -27,6 +28,10 @@ const resource = {
 };
 
 describe("resource model", () => {
+  it("creates compact six-character alphanumeric content ids", () => {
+    expect(createResourceId()).toMatch(/^[a-z0-9]{6}$/);
+  });
+
   it("validates durable resources and maps them to chat refs", () => {
     const parsed = resourceRecordSchema.parse(resource);
     expect(toResourceRef(parsed)).toEqual({
@@ -52,7 +57,7 @@ describe("resource model", () => {
 
   it("maps persistent artifacts to shared message refs", () => {
     const artifact = artifactRecordSchema.parse({
-      id: "artifact-1",
+      id: "resource-1",
       conversationId: "conversation-1",
       kind: "resource-view",
       title: "Report",
@@ -61,7 +66,7 @@ describe("resource model", () => {
       updatedAt: 1,
     });
     expect(toArtifactRef(artifact)).toEqual({
-      id: "artifact-1",
+      id: "resource-1",
       resourceId: "resource-1",
       kind: "resource-view",
     });

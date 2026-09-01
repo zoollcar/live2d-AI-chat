@@ -58,6 +58,8 @@ const settingsPanelProps = {
   onTestRealtime: vi.fn(async () => undefined),
   onTestStt: vi.fn(),
   onTestTts: vi.fn(),
+  developerTools: [],
+  onInvokeTool: vi.fn(async () => ({ ok: true })),
 };
 
 async function renderOpenSettings(): Promise<string> {
@@ -111,9 +113,20 @@ describe("SettingsPanel voice routes", () => {
     expect(markup).toContain("route-settings-details");
     expect(markup).not.toContain("Test provider connection");
     expect(markup).toContain("These controls apply to both voice pipelines");
-    expect(markup.indexOf("Conversation behavior")).toBeLessThan(
-      markup.indexOf("aria-label=\"Classic voice pipeline settings\""),
+    expect(markup.indexOf("aria-label=\"Classic voice pipeline settings\"")).toBeLessThan(
+      markup.indexOf("Conversation behavior"),
     );
+  });
+
+  it("keeps Voice experience and Content and tools collapsed by default", async () => {
+    const markup = await renderSettings("classic");
+
+    expect(markup).toMatch(/<details class="settings-section route-settings-details voice-route-section"><summary><strong>Voice experience<\/strong>/);
+    expect(markup).toMatch(/<details class="settings-section route-settings-details voice-behavior-section"><summary><strong>Conversation behavior<\/strong>/);
+    expect(markup).toMatch(/<details class="settings-section route-settings-details" aria-label="Content providers"><summary><strong>Content and tools<\/strong>/);
+    expect(markup).toMatch(/voice-route-section[\s\S]*Classic voice pipeline settings[\s\S]*<\/details><details class="settings-section route-settings-details voice-behavior-section"/);
+    expect(markup).not.toContain("Web transport");
+    expect(markup).not.toContain("Transcript transport");
   });
 
   it("shows provider-neutral Realtime settings and asks for a key before loading options", async () => {
@@ -131,8 +144,8 @@ describe("SettingsPanel voice routes", () => {
     expect(markup).toContain("Get a key ↗");
     expect(markup).toContain("Test provider connection");
     expect(markup).toContain("Show API key");
-    expect(markup.indexOf("Conversation behavior")).toBeLessThan(
-      markup.indexOf("aria-label=\"Realtime voice settings\""),
+    expect(markup.indexOf("aria-label=\"Realtime voice settings\"")).toBeLessThan(
+      markup.indexOf("Conversation behavior"),
     );
     expect(markup).not.toContain(">Speech recognition<");
     expect(markup).not.toContain(">Speech synthesis<");
@@ -238,7 +251,7 @@ describe("SettingsPanel voice routes", () => {
 
     await act(async () => root.render(createElement(SettingsPanel, settingsPanelProps)));
     const synthesisSection = Array.from(container.querySelectorAll("details"))
-      .find((section) => section.textContent?.includes("Speech synthesis"));
+      .find((section) => section.querySelector(":scope > summary > strong")?.textContent === "Speech synthesis");
     const transportField = Array.from(synthesisSection?.querySelectorAll("label.field") ?? [])
       .find((field) => field.querySelector(":scope > span")?.textContent === "Transport");
     const transportSelect = transportField?.querySelector("select");

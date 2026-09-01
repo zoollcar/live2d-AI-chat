@@ -12,7 +12,7 @@ function jsonResponse(value: unknown, init?: ResponseInit): Response {
 }
 
 describe("Exa Contents provider", () => {
-  it("uses the Contents endpoint with top-level text options on direct transport", async () => {
+  it("uses the Contents endpoint with top-level text options", async () => {
     const directFetch = vi.fn(async () => jsonResponse({
       results: [{
         title: "Example article",
@@ -24,7 +24,6 @@ describe("Exa Contents provider", () => {
       statuses: [{ id: "https://example.com/article", status: "success" }],
     })) as unknown as typeof fetch;
     const provider = createExaContentsProvider({
-      transport: "direct",
       apiKey: "exa-secret",
       directFetch,
       maxCharacters: 8_000,
@@ -51,39 +50,8 @@ describe("Exa Contents provider", () => {
     expect(body).not.toHaveProperty("contents");
   });
 
-  it("uses only the selected extension transport and keeps credentials out of fetch headers", async () => {
-    const extensionFetch = vi.fn(async () => jsonResponse({
-      results: [{ url: "https://example.com/", text: "Readable page" }],
-      statuses: [{ id: "https://example.com/", status: "success" }],
-    })) as unknown as typeof fetch;
-    const extensionFetchFactory = vi.fn(() => extensionFetch);
-    const directFetch = vi.fn();
-    const provider = createExaContentsProvider({
-      transport: "extension",
-      apiKey: "extension-owned-secret",
-      directFetch: directFetch as unknown as typeof fetch,
-      extensionFetchFactory,
-    });
-
-    await provider.read("https://example.com/");
-
-    expect(extensionFetchFactory).toHaveBeenCalledWith(expect.objectContaining({
-      operation: "exa",
-      provider: "exa",
-      apiKey: "extension-owned-secret",
-    }));
-    expect(directFetch).not.toHaveBeenCalled();
-    const [, init] = vi.mocked(extensionFetch).mock.calls[0]!;
-    expect(new Headers(init?.headers).has("x-api-key")).toBe(false);
-    expect(JSON.parse(String(init?.body))).toEqual({
-      urls: ["https://example.com/"],
-      text: true,
-    });
-  });
-
   it("checks per-URL crawl status even when the HTTP response succeeds", async () => {
     const provider = createExaContentsProvider({
-      transport: "direct",
       apiKey: "secret",
       directFetch: vi.fn(async () => jsonResponse({
         results: [],
@@ -102,7 +70,7 @@ describe("Exa Contents provider", () => {
   });
 
   it("requires a credential before creating a request", () => {
-    expect(() => createExaContentsProvider({ transport: "direct", apiKey: "" })).toThrowError(
+    expect(() => createExaContentsProvider({ apiKey: "" })).toThrowError(
       expect.objectContaining<Partial<ContentProviderError>>({ code: "missing-credential" }),
     );
   });
@@ -110,7 +78,6 @@ describe("Exa Contents provider", () => {
   it("does not leak a credential from a thrown transport error", async () => {
     const secret = "exa-never-print-this";
     const provider = createExaContentsProvider({
-      transport: "direct",
       apiKey: secret,
       directFetch: vi.fn(async () => {
         throw new Error(`network failed with ${secret}`);
@@ -131,7 +98,6 @@ describe("Exa Contents provider", () => {
   it("honors an already-aborted request without starting fetch", async () => {
     const directFetch = vi.fn();
     const provider = createExaContentsProvider({
-      transport: "direct",
       apiKey: "secret",
       directFetch: directFetch as unknown as typeof fetch,
     });

@@ -111,6 +111,7 @@ export class LocalAgentRuntime implements AgentRuntime {
         workspace: options.workspace,
         network: options.network,
         capabilities: options.toolCapabilities,
+        enabledTools: options.enabledTools,
       });
       const wllamaTools = toWllamaTools(registry.wllamaTools);
       const messages: ChatCompletionMessage[] = [...options.messages];

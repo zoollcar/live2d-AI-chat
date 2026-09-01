@@ -148,7 +148,7 @@ async function svgResource(): Promise<ResourceBundle> {
 }
 
 const artifact: ArtifactRecord = {
-  id: "artifact-1",
+  id: "resource-text",
   conversationId: "conversation-1",
   kind: "resource-view",
   title: "Notes",
@@ -173,7 +173,7 @@ describe("resource archive v2", () => {
     expect(imported.manifest?.entries).toEqual(expect.arrayContaining([
       expect.objectContaining({ path: "resources/resource-text/original.txt", role: "resource-original" }),
       expect.objectContaining({ path: "resources/resource-text/extracted.json", role: "resource-extracted" }),
-      expect.objectContaining({ path: "artifacts/artifact-1/artifact.json", role: "artifact-metadata" }),
+      expect.objectContaining({ path: "artifacts/resource-text/artifact.json", role: "artifact-metadata" }),
       expect.objectContaining({
         path: "resources/resource-svg/original.svg",
         role: "resource-original",

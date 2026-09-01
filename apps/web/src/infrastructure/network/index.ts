@@ -28,8 +28,8 @@ export {
   type SupadataTranscriptRequest,
 } from "./supadata-transcript";
 export type {
+  DirectProviderOptions,
   ExtensionFetchFactory,
-  ProviderTransportOptions,
   TranscriptCue,
   VideoTranscriptContent,
   VideoTranscriptPending,
