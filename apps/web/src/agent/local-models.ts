@@ -85,7 +85,7 @@ export async function downloadLocalModel(
     await modelManager.cacheManager.writeMetadata(file.key, {
       originalURL: file.url,
       originalSize: result.total,
-      etag: result.etag.replace(/[^A-Za-z0-9]/g, ""),
+      etag: result.etag,
     });
     if (result.total > 0 && result.total !== file.total) {
       grandTotal += result.total - file.total;

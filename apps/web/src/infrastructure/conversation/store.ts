@@ -157,7 +157,7 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
     if (!activeId) return;
     let snapshot: Conversation | undefined;
     set((state) => ({
-      conversations: sortConversations(state.conversations.map((conversation) => {
+      conversations: state.conversations.map((conversation) => {
         if (conversation.id !== activeId) return conversation;
         const messages = updater(conversation.messages);
         const automaticTitle = conversation.title === "New conversation"
@@ -170,7 +170,7 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
           messages,
         });
         return snapshot;
-      })),
+      }),
     }));
     if (snapshot) scheduleSave(snapshot);
   },

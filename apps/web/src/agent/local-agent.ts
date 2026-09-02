@@ -139,6 +139,7 @@ export class LocalAgentRuntime implements AgentRuntime {
         let usedTokens: number | undefined;
         const calls = new Map<number, { id: string; name: string; arguments: string }>();
         for await (const chunk of stream) {
+          if (signal.aborted) return;
           const choice = chunk.choices[0];
           if (!choice) continue;
           finishReason = choice.finish_reason ?? finishReason;

@@ -64,6 +64,30 @@ describe("conversation model snapshots", () => {
     });
   });
 
+  it("keeps the conversation order stable while streaming message updates", () => {
+    const active = useConversationStore.getState().conversations[0];
+    const newer = createConversation({
+      characterId: "ai-secretary",
+      modelSnapshot: active.modelSnapshot,
+      messages: [{ role: "user", content: "Newer conversation" }],
+      now: 200,
+    });
+    useConversationStore.setState({
+      conversations: [newer, active],
+      activeConversationId: active.id,
+    });
+
+    useConversationStore.getState().updateMessages((messages) => [
+      ...messages,
+      { role: "assistant", content: "Streaming delta" },
+    ]);
+
+    expect(useConversationStore.getState().conversations.map(({ id }) => id)).toEqual([
+      newer.id,
+      active.id,
+    ]);
+  });
+
   it("does not expose imported conversations when their atomic persistence fails", async () => {
     const before = useConversationStore.getState();
     const imported = createConversation({
