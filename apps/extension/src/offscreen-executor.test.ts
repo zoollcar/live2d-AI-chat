@@ -148,4 +148,47 @@ describe("OffscreenExecutor flow control", () => {
     });
     executor.dispose();
   });
+
+  it("cancels the response reader when a streaming request is cancelled", async () => {
+    const cancel = vi.fn();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3]));
+      },
+      cancel,
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(stream, { status: 200 })));
+
+    const port = new FakePort();
+    const executor = new OffscreenExecutor(port as unknown as Browser.runtime.Port);
+    port.emit(start());
+
+    await vi.waitFor(() => {
+      expect(port.messages()).toContainEqual(expect.objectContaining({
+        type: "response-chunk",
+        requestId: "request-1",
+      }));
+    });
+
+    port.emit({
+      type: "cancel",
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+      nonce,
+      requestId: "request-1",
+    });
+
+    await vi.waitFor(() => {
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(port.messages()).toContainEqual(expect.objectContaining({
+        type: "error",
+        code: "cancelled",
+        requestId: "request-1",
+      }));
+    });
+    expect(port.messages()).not.toContainEqual(expect.objectContaining({
+      type: "end",
+      requestId: "request-1",
+    }));
+    executor.dispose();
+  });
 });

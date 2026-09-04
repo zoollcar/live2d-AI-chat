@@ -35,6 +35,7 @@ interface RequestState {
   silent: boolean;
   cancelled: boolean;
   bodylessChunkAcknowledged: boolean;
+  responseReader?: ReadableStreamDefaultReader<Uint8Array>;
 }
 
 const KEEP_ALIVE_INTERVAL_MS = 20_000;
@@ -250,12 +251,21 @@ export class OffscreenExecutor {
 
   async #streamResponse(state: RequestState, stream: ReadableStream<Uint8Array>): Promise<void> {
     const reader = stream.getReader();
+    state.responseReader = reader;
     let sequence = 0;
     let transferred = 0;
     try {
       while (true) {
+        if (state.controller.signal.aborted) {
+          await reader.cancel();
+          return;
+        }
         const { done, value } = await reader.read();
         if (done) return;
+        if (state.controller.signal.aborted) {
+          await reader.cancel();
+          return;
+        }
         for (let offset = 0; offset < value.byteLength; offset += BRIDGE_CHUNK_BYTES) {
           const chunk = value.subarray(offset, Math.min(offset + BRIDGE_CHUNK_BYTES, value.byteLength));
           transferred += chunk.byteLength;
@@ -281,7 +291,11 @@ export class OffscreenExecutor {
           sequence += 1;
         }
       }
+    } catch (error) {
+      await reader.cancel().catch(() => undefined);
+      throw error;
     } finally {
+      if (state.responseReader === reader) state.responseReader = undefined;
       reader.releaseLock();
     }
   }
@@ -317,6 +331,7 @@ export class OffscreenExecutor {
   #abort(state: RequestState, silent: boolean): void {
     state.silent ||= silent;
     state.controller.abort();
+    void state.responseReader?.cancel().catch(() => undefined);
     this.#clearPendingAck(state, new DOMException("Request was cancelled.", "AbortError"));
   }
 
